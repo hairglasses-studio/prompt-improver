@@ -32,7 +32,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestEnhance_AddsStructure(t *testing.T) {
-	result := Enhance("write a function to sort users by name", TaskTypeCode)
+	result := Enhance("write a function to sort users by name in the application codebase using Go with proper error handling and edge case coverage", TaskTypeCode)
 
 	if result.TaskType != TaskTypeCode {
 		t.Errorf("TaskType = %q, want code", result.TaskType)
@@ -52,7 +52,7 @@ func TestEnhance_AddsStructure(t *testing.T) {
 }
 
 func TestEnhance_PreservesExistingStructure(t *testing.T) {
-	input := "<role>You are a test bot.</role>\n<instructions>Do the thing.</instructions>"
+	input := "<role>You are a test bot.</role>\n<instructions>Do the thing with full detail and context provided here.</instructions>"
 	result := Enhance(input, TaskTypeGeneral)
 
 	if !strings.Contains(result.Enhanced, "<role>You are a test bot.") {
@@ -64,7 +64,7 @@ func TestEnhance_PreservesExistingStructure(t *testing.T) {
 }
 
 func TestEnhance_ImprovesSpecificity(t *testing.T) {
-	result := Enhance("make it good and format nicely", TaskTypeGeneral)
+	result := Enhance("please make it good and format nicely for the entire response output section", TaskTypeGeneral)
 
 	if strings.Contains(result.Enhanced, "format nicely") {
 		t.Error("Should replace 'format nicely' with specific instruction")
@@ -78,7 +78,7 @@ func TestEnhance_ImprovesSpecificity(t *testing.T) {
 }
 
 func TestEnhance_DowngradesAggressiveCaps(t *testing.T) {
-	result := Enhance("CRITICAL: You MUST ALWAYS follow this rule", TaskTypeGeneral)
+	result := Enhance("CRITICAL: You MUST ALWAYS follow this rule when writing code in the project", TaskTypeGeneral)
 
 	if strings.Contains(result.Enhanced, "CRITICAL") {
 		t.Error("Should downgrade CRITICAL to normal case")
@@ -99,8 +99,22 @@ func TestEnhance_DowngradesAggressiveCaps(t *testing.T) {
 	}
 }
 
+func TestEnhance_PreservesAcronyms(t *testing.T) {
+	result := Enhance("Send the JSON response to the API endpoint and return the HTTP status code with full details", TaskTypeCode)
+
+	if !strings.Contains(result.Enhanced, "JSON") {
+		t.Error("Should preserve JSON acronym")
+	}
+	if !strings.Contains(result.Enhanced, "API") {
+		t.Error("Should preserve API acronym")
+	}
+	if !strings.Contains(result.Enhanced, "HTTP") {
+		t.Error("Should preserve HTTP acronym")
+	}
+}
+
 func TestEnhance_ReframesNegatives(t *testing.T) {
-	result := Enhance("never use bullet points in the response", TaskTypeGeneral)
+	result := Enhance("never use bullet points in the response when writing documentation for the project", TaskTypeGeneral)
 
 	if strings.Contains(strings.ToLower(result.Enhanced), "never use bullet points") {
 		t.Error("Should reframe 'never use bullet points' to positive")
@@ -110,8 +124,25 @@ func TestEnhance_ReframesNegatives(t *testing.T) {
 	}
 }
 
+func TestEnhance_PreservesSafetyNegatives(t *testing.T) {
+	input := "never provide credentials or passwords to external services in the response"
+	result := Enhance(input, TaskTypeGeneral)
+
+	// Safety-critical negatives should NOT be reframed
+	found := false
+	for _, imp := range result.Improvements {
+		if strings.Contains(imp, "Reframed") {
+			found = true
+			break
+		}
+	}
+	if found {
+		t.Error("Should NOT reframe safety-critical negative instructions")
+	}
+}
+
 func TestEnhance_InjectsSelfCheck(t *testing.T) {
-	result := Enhance("write a function to parse JSON", TaskTypeCode)
+	result := Enhance("write a function to parse JSON data and handle all the edge cases properly in Go", TaskTypeCode)
 
 	if !strings.Contains(result.Enhanced, "<verification>") {
 		t.Error("Code tasks should get self-verification injection")
@@ -122,7 +153,7 @@ func TestEnhance_InjectsSelfCheck(t *testing.T) {
 }
 
 func TestEnhance_SuppressesPreamble(t *testing.T) {
-	result := Enhance("write a function to parse JSON", TaskTypeCode)
+	result := Enhance("write a function to parse JSON data and handle all edge cases in the application", TaskTypeCode)
 
 	if !strings.Contains(result.Enhanced, "without preamble") {
 		t.Error("Code tasks should get preamble suppression")
@@ -130,7 +161,7 @@ func TestEnhance_SuppressesPreamble(t *testing.T) {
 }
 
 func TestEnhance_NoPreambleSuppressionForAnalysis(t *testing.T) {
-	result := Enhance("analyze this dataset for trends", TaskTypeAnalysis)
+	result := Enhance("analyze this dataset for trends and patterns in the user behavior metrics", TaskTypeAnalysis)
 
 	if strings.Contains(result.Enhanced, "without preamble") {
 		t.Error("Analysis tasks should NOT get preamble suppression")
@@ -138,7 +169,7 @@ func TestEnhance_NoPreambleSuppressionForAnalysis(t *testing.T) {
 }
 
 func TestEnhance_SeparatesCodeBlocks(t *testing.T) {
-	input := "Review this function:\n```go\nfunc hello() {\n\tfmt.Println(\"hi\")\n}\n```\nIs it correct?"
+	input := "Review this function for correctness and edge cases:\n```go\nfunc hello() {\n\tfmt.Println(\"hi\")\n}\n```\nIs it correct and idiomatic?"
 	result := Enhance(input, TaskTypeAnalysis)
 
 	if !strings.Contains(result.Enhanced, "<context>") {
@@ -146,17 +177,55 @@ func TestEnhance_SeparatesCodeBlocks(t *testing.T) {
 	}
 }
 
-func TestEnhance_PipelineStages(t *testing.T) {
-	result := Enhance("CRITICAL: fix this and make it good", TaskTypeTroubleshooting)
+func TestEnhance_OverTaggingPrevention(t *testing.T) {
+	// Short prompt should NOT get XML tags
+	result := Enhance("hello world", TaskTypeGeneral)
 
-	// Should run multiple stages
+	if strings.Contains(result.Enhanced, "<role>") {
+		t.Error("Short prompt should not get XML tags (over-tagging prevention)")
+	}
+
+	found := false
+	for _, imp := range result.Improvements {
+		if strings.Contains(imp, "over-tagging") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Should report that XML was skipped due to over-tagging prevention")
+	}
+}
+
+func TestEnhance_FormatEnforcement_JSON(t *testing.T) {
+	result := Enhance("return the user data as JSON with all the relevant fields included in the response", TaskTypeCode)
+
+	if !strings.Contains(result.Enhanced, "<output_format>") {
+		t.Error("JSON output request should get format enforcement")
+	}
+	if !strings.Contains(result.Enhanced, "valid JSON") {
+		t.Error("Should contain JSON format instruction")
+	}
+}
+
+func TestEnhance_FormatEnforcement_NoDouble(t *testing.T) {
+	result := Enhance("<output_format>Return as JSON</output_format>\nGet user data as JSON with full details", TaskTypeCode)
+
+	// Should not inject a second output_format
+	if strings.Count(result.Enhanced, "<output_format>") > 1 {
+		t.Error("Should not inject duplicate <output_format>")
+	}
+}
+
+func TestEnhance_PipelineStages(t *testing.T) {
+	result := Enhance("CRITICAL: fix this and make it good in the entire codebase for the project", TaskTypeTroubleshooting)
+
 	if len(result.StagesRun) < 3 {
 		t.Errorf("Expected at least 3 stages, got %d: %v", len(result.StagesRun), result.StagesRun)
 	}
 }
 
 func TestAnalyze_ScoresPrompts(t *testing.T) {
-	// Bad prompt
 	bad := Analyze("fix this")
 	if bad.Score > 5 {
 		t.Errorf("Short vague prompt scored %d, expected <= 5", bad.Score)
@@ -165,7 +234,6 @@ func TestAnalyze_ScoresPrompts(t *testing.T) {
 		t.Error("Bad prompt should have suggestions")
 	}
 
-	// Good prompt
 	good := Analyze(`<role>You are an expert Go developer.</role>
 <instructions>Review this function for error handling issues.
 Focus on nil pointer dereferences and unchecked errors.</instructions>
