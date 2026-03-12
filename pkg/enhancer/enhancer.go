@@ -1,11 +1,22 @@
 // Package enhancer provides deterministic prompt enhancement using XML structuring,
 // specificity improvements, context reordering, and task-type-aware formatting.
 // No external LLM calls — pure Go string manipulation.
+//
+// Based on Anthropic's official prompt engineering best practices:
+// - XML tags for structure (Claude is specifically trained to recognize them)
+// - Context placement (long context before query for 20K+ token prompts)
+// - Positive framing over negative (Claude 4.x responds better to "do X" than "don't Y")
+// - Aggressive language downgrading (MUST/CRITICAL → normal case for Claude 4.x)
+// - Few-shot example wrapping in <examples><example> tags
+// - Self-check injection for code/math/analysis tasks
+// - Preamble suppression for direct output
 package enhancer
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // EnhanceResult holds the output of the enhancement pipeline
@@ -19,14 +30,16 @@ type EnhanceResult struct {
 
 // AnalyzeResult holds prompt quality analysis
 type AnalyzeResult struct {
-	Score       int      `json:"score"`
-	Suggestions []string `json:"suggestions"`
-	HasXML      bool     `json:"has_xml_structure"`
-	HasExamples bool     `json:"has_examples"`
-	HasContext   bool     `json:"has_context"`
-	HasFormat   bool     `json:"has_output_format"`
-	WordCount   int      `json:"word_count"`
-	TaskType    TaskType `json:"task_type"`
+	Score             int      `json:"score"`
+	Suggestions       []string `json:"suggestions"`
+	HasXML            bool     `json:"has_xml_structure"`
+	HasExamples       bool     `json:"has_examples"`
+	HasContext         bool     `json:"has_context"`
+	HasFormat         bool     `json:"has_output_format"`
+	HasNegativeFrames bool     `json:"has_negative_framing"`
+	HasAggressiveCaps bool     `json:"has_aggressive_caps"`
+	WordCount         int      `json:"word_count"`
+	TaskType          TaskType `json:"task_type"`
 }
 
 // Enhance runs the full enhancement pipeline on a raw prompt
@@ -42,21 +55,45 @@ func Enhance(raw string, taskType TaskType) EnhanceResult {
 
 	text := raw
 
-	// Stage 1: Specificity — replace vague phrases
+	// Stage 1: Specificity — replace vague phrases with concrete instructions
 	text, specImprovements := improveSpecificity(text)
 	if len(specImprovements) > 0 {
 		result.StagesRun = append(result.StagesRun, "specificity")
 		result.Improvements = append(result.Improvements, specImprovements...)
 	}
 
-	// Stage 2: Structure — wrap in XML tags based on task type
+	// Stage 2: Positive reframing — rewrite known negative patterns first
+	text, reframeImprovements := reframeNegatives(text)
+	if len(reframeImprovements) > 0 {
+		result.StagesRun = append(result.StagesRun, "positive_reframe")
+		result.Improvements = append(result.Improvements, reframeImprovements...)
+	}
+
+	// Stage 3: Tone — downgrade remaining aggressive ALL-CAPS for Claude 4.x
+	text, toneImprovements := downgradeTone(text)
+	if len(toneImprovements) > 0 {
+		result.StagesRun = append(result.StagesRun, "tone_downgrade")
+		result.Improvements = append(result.Improvements, toneImprovements...)
+	}
+
+	// Stage 4: Structure — wrap in XML tags based on task type
 	text, structImprovements := addStructure(text, taskType)
 	result.StagesRun = append(result.StagesRun, "structure")
 	result.Improvements = append(result.Improvements, structImprovements...)
 
-	// Stage 3: Context reorder — long context to top, query to bottom
-	text = reorderContext(text)
-	result.StagesRun = append(result.StagesRun, "context_reorder")
+	// Stage 5: Self-check — inject verification for code/math/analysis
+	text, checkImprovements := injectSelfCheck(text, taskType)
+	if len(checkImprovements) > 0 {
+		result.StagesRun = append(result.StagesRun, "self_check")
+		result.Improvements = append(result.Improvements, checkImprovements...)
+	}
+
+	// Stage 6: Preamble suppression — add direct response instruction
+	text, preambleImprovements := suppressPreamble(text, taskType)
+	if len(preambleImprovements) > 0 {
+		result.StagesRun = append(result.StagesRun, "preamble_suppression")
+		result.Improvements = append(result.Improvements, preambleImprovements...)
+	}
 
 	result.Enhanced = text
 	return result
@@ -80,6 +117,8 @@ func Analyze(prompt string) AnalyzeResult {
 	result.HasExamples = strings.Contains(lower, "example") || strings.Contains(lower, "<example")
 	result.HasContext = strings.Contains(lower, "context") || strings.Contains(lower, "<context")
 	result.HasFormat = strings.Contains(lower, "format") || strings.Contains(lower, "<output")
+	result.HasNegativeFrames = negativePattern.MatchString(prompt)
+	result.HasAggressiveCaps = aggressiveCapsPattern.MatchString(prompt)
 
 	// Score (1-10)
 	score := 3 // baseline for any non-empty prompt
@@ -97,13 +136,13 @@ func Analyze(prompt string) AnalyzeResult {
 		score += 1
 	}
 	if len(words) > 20 {
-		score += 1 // sufficient detail
+		score += 1
 	}
 	if len(words) > 50 {
-		score += 1 // comprehensive
+		score += 1
 	}
 
-	// Check for vague patterns (deductions)
+	// Deductions
 	vagueCount := 0
 	for pattern := range vagueReplacements {
 		if strings.Contains(lower, pattern) {
@@ -111,6 +150,12 @@ func Analyze(prompt string) AnalyzeResult {
 		}
 	}
 	if vagueCount > 2 {
+		score--
+	}
+	if result.HasNegativeFrames {
+		score--
+	}
+	if result.HasAggressiveCaps {
 		score--
 	}
 
@@ -124,22 +169,28 @@ func Analyze(prompt string) AnalyzeResult {
 
 	// Suggestions
 	if !result.HasXML {
-		result.Suggestions = append(result.Suggestions, "Add XML structure tags (<role>, <instructions>, <constraints>) for clearer organization")
+		result.Suggestions = append(result.Suggestions, "Add XML structure tags (<role>, <instructions>, <constraints>) — Claude is specifically trained to recognize XML as prompt structure")
 	}
 	if !result.HasExamples {
-		result.Suggestions = append(result.Suggestions, "Include examples of desired output using <examples><example> tags")
+		result.Suggestions = append(result.Suggestions, "Include 3-5 examples in <examples><example> tags — Claude replicates formatting details from examples")
 	}
 	if !result.HasContext {
-		result.Suggestions = append(result.Suggestions, "Add a <context> section with relevant background information")
+		result.Suggestions = append(result.Suggestions, "Add a <context> section with relevant background — place long context BEFORE the query for best results")
 	}
 	if !result.HasFormat {
-		result.Suggestions = append(result.Suggestions, "Specify the desired output format in an <output_format> section")
+		result.Suggestions = append(result.Suggestions, "Specify desired output format in an <output_format> section — use positive format instructions ('write in prose') not negative ('don't use bullets')")
 	}
 	if len(words) < 20 {
-		result.Suggestions = append(result.Suggestions, "Add more detail — prompts under 20 words often produce inconsistent results")
+		result.Suggestions = append(result.Suggestions, "Add more detail — prompts under 20 words produce inconsistent results. Quantify constraints: '5 bullets, each under 15 words' instead of 'be concise'")
 	}
 	if vagueCount > 0 {
 		result.Suggestions = append(result.Suggestions, fmt.Sprintf("Replace %d vague phrases with specific instructions (e.g., 'format nicely' → 'Format using markdown with headers and code blocks')", vagueCount))
+	}
+	if result.HasNegativeFrames {
+		result.Suggestions = append(result.Suggestions, "Reframe negative instructions as positive — 'Write in flowing prose paragraphs' works better than 'NEVER use bullet points'. Claude 4.x can exhibit reverse psychology with heavy negative framing")
+	}
+	if result.HasAggressiveCaps {
+		result.Suggestions = append(result.Suggestions, "Downgrade ALL-CAPS emphasis — Claude 4.x overtriggers on aggressive language like CRITICAL/MUST/IMPORTANT. Normal case is equally effective")
 	}
 
 	// Task-specific suggestions
@@ -174,27 +225,29 @@ func WrapWithExamples(prompt string, examples []string) string {
 	return b.String()
 }
 
-// --- Internal pipeline stages ---
+// --- Stage 1: Specificity ---
 
-// vagueReplacements maps vague phrases to specific alternatives
 var vagueReplacements = map[string]string{
-	"format nicely":      "Format using markdown with headers and code blocks",
-	"make it good":       "Ensure correctness, clarity, and completeness",
-	"make it better":     "Improve clarity, reduce redundancy, and strengthen specificity",
-	"clean it up":        "Refactor for readability: consistent naming, clear structure, remove dead code",
-	"do your best":       "Provide a thorough, well-structured response",
-	"be creative":        "Explore unconventional approaches while remaining practical",
-	"be thorough":        "Cover all edge cases and provide step-by-step detail",
-	"keep it simple":     "Use the minimum complexity needed — prefer standard patterns over abstractions",
-	"make it fast":       "Optimize for performance: minimize allocations, reduce iterations, cache where appropriate",
-	"make it secure":     "Follow security best practices: validate inputs, use parameterized queries, apply least privilege",
-	"handle errors":      "Return descriptive errors with context, wrap errors at boundaries, never swallow errors silently",
-	"add tests":          "Write unit tests covering happy path, edge cases, and error conditions",
-	"fix this":           "Identify the root cause, apply a minimal fix, and verify it resolves the issue",
-	"help me":            "Guide me step-by-step through",
-	"i need":             "The goal is to",
-	"can you":            "Please",
+	"format nicely":       "Format using markdown with headers and code blocks",
+	"make it good":        "Ensure correctness, clarity, and completeness",
+	"make it better":      "Improve clarity, reduce redundancy, and strengthen specificity",
+	"clean it up":         "Refactor for readability: consistent naming, clear structure, remove dead code",
+	"do your best":        "Provide a thorough, well-structured response",
+	"be creative":         "Explore unconventional approaches while remaining practical",
+	"be thorough":         "Cover all edge cases and provide step-by-step detail",
+	"keep it simple":      "Use the minimum complexity needed — prefer standard patterns over abstractions",
+	"make it fast":        "Optimize for performance: minimize allocations, reduce iterations, cache where appropriate",
+	"make it secure":      "Follow security best practices: validate inputs, use parameterized queries, apply least privilege",
+	"handle errors":       "Return descriptive errors with context, wrap errors at boundaries, never swallow errors silently",
+	"add tests":           "Write unit tests covering happy path, edge cases, and error conditions",
+	"fix this":            "Identify the root cause, apply a minimal fix, and verify it resolves the issue",
+	"help me":             "Guide me step-by-step through",
+	"i need":              "The goal is to",
+	"can you":             "Please",
 	"as soon as possible": "by [specific deadline]",
+	"be concise":          "Limit each point to one sentence. Use 5 bullets maximum",
+	"be brief":            "Respond in 3 sentences or fewer",
+	"summarize":           "Extract the 3-5 most important points, each in one sentence",
 }
 
 func improveSpecificity(text string) (string, []string) {
@@ -203,7 +256,6 @@ func improveSpecificity(text string) (string, []string) {
 
 	for vague, specific := range vagueReplacements {
 		if idx := strings.Index(lower, vague); idx != -1 {
-			// Replace preserving original casing context
 			text = text[:idx] + specific + text[idx+len(vague):]
 			lower = strings.ToLower(text)
 			improvements = append(improvements, fmt.Sprintf("Replaced '%s' → '%s'", vague, specific))
@@ -213,7 +265,93 @@ func improveSpecificity(text string) (string, []string) {
 	return text, improvements
 }
 
-// roleForTaskType returns an appropriate role prefix
+// --- Stage 2: Tone downgrade (Claude 4.x best practice) ---
+
+// aggressiveCapsPattern detects ALL-CAPS emphasis words
+var aggressiveCapsPattern = regexp.MustCompile(`\b(CRITICAL|IMPORTANT|MUST|ALWAYS|NEVER|WARNING|REQUIRED|MANDATORY|ABSOLUTELY|ESSENTIAL)\b`)
+
+// aggressiveCapsReplacements maps ALL-CAPS to normal case
+var aggressiveCapsReplacements = map[string]string{
+	"CRITICAL":    "critical",
+	"IMPORTANT":   "important",
+	"MUST":        "must",
+	"ALWAYS":      "always",
+	"NEVER":       "never",
+	"WARNING":     "warning",
+	"REQUIRED":    "required",
+	"MANDATORY":   "required",
+	"ABSOLUTELY":  "",
+	"ESSENTIAL":   "essential",
+}
+
+func downgradeTone(text string) (string, []string) {
+	var improvements []string
+
+	matches := aggressiveCapsPattern.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return text, nil
+	}
+
+	for _, match := range matches {
+		replacement, ok := aggressiveCapsReplacements[match]
+		if !ok {
+			continue
+		}
+		if replacement == "" {
+			// Remove the word entirely (with trailing space)
+			text = strings.Replace(text, match+" ", "", 1)
+			text = strings.Replace(text, " "+match, "", 1)
+		} else {
+			text = strings.Replace(text, match, replacement, 1)
+		}
+	}
+
+	improvements = append(improvements, fmt.Sprintf("Downgraded %d aggressive ALL-CAPS words to normal case (Claude 4.x best practice)", len(matches)))
+	return text, improvements
+}
+
+// --- Stage 3: Negative-to-positive reframing ---
+
+var negativePattern = regexp.MustCompile(`(?i)\b(NEVER|DO NOT|DON'T|MUST NOT|SHOULD NOT|CANNOT|CAN'T)\b`)
+
+// negativeReframings maps common negative instructions to positive alternatives
+var negativeReframings = map[string]string{
+	"never use bullet points":     "Write in flowing prose paragraphs",
+	"don't use markdown":          "Write in plain text with clear paragraph breaks",
+	"do not use markdown":         "Write in plain text with clear paragraph breaks",
+	"never use markdown":          "Write in plain text with clear paragraph breaks",
+	"never use emojis":            "Write using text only, without decorative symbols",
+	"don't make assumptions":      "Ask clarifying questions when information is missing",
+	"do not make assumptions":     "Ask clarifying questions when information is missing",
+	"don't guess":                 "State when you are uncertain and ask for clarification",
+	"do not guess":                "State when you are uncertain and ask for clarification",
+	"never hallucinate":           "Only include information you can verify from the provided context",
+	"don't be verbose":            "Limit each point to one sentence",
+	"do not be verbose":           "Limit each point to one sentence",
+	"don't overthink":             "Choose an approach and commit to it",
+	"do not overthink":            "Choose an approach and commit to it",
+	"never skip steps":            "Show each step of your work",
+	"don't repeat yourself":       "State each point once, clearly",
+	"do not repeat yourself":      "State each point once, clearly",
+}
+
+func reframeNegatives(text string) (string, []string) {
+	lower := strings.ToLower(text)
+	var improvements []string
+
+	for negative, positive := range negativeReframings {
+		if idx := strings.Index(lower, negative); idx != -1 {
+			text = text[:idx] + positive + text[idx+len(negative):]
+			lower = strings.ToLower(text)
+			improvements = append(improvements, fmt.Sprintf("Reframed '%s' → '%s' (positive framing)", negative, positive))
+		}
+	}
+
+	return text, improvements
+}
+
+// --- Stage 4: XML Structure ---
+
 func roleForTaskType(tt TaskType) string {
 	switch tt {
 	case TaskTypeCode:
@@ -231,38 +369,37 @@ func roleForTaskType(tt TaskType) string {
 	}
 }
 
-// constraintsForTaskType returns task-type-specific constraints
 func constraintsForTaskType(tt TaskType) string {
 	switch tt {
 	case TaskTypeCode:
 		return `- Write clean, idiomatic code
-- Handle errors explicitly
+- Handle errors explicitly — return descriptive errors with context
 - Prefer simplicity over cleverness
-- Do not add features beyond what was requested`
+- Only implement what was requested`
 	case TaskTypeCreative:
-		return `- Provide specific parameters, not vague descriptions
-- Balance ambition with practicality
-- Consider technical constraints`
+		return `- Provide specific parameters and values, not vague descriptions
+- Balance creative ambition with practical constraints
+- Include concrete examples of the aesthetic you're describing`
 	case TaskTypeAnalysis:
-		return `- Support claims with evidence
-- Distinguish between facts and opinions
-- Note confidence levels for uncertain conclusions`
+		return `- Support every claim with evidence from the provided data
+- Distinguish facts from inferences, note confidence levels
+- Use structured comparisons when evaluating alternatives`
 	case TaskTypeTroubleshooting:
-		return `- Start with the least disruptive checks
-- Do not restart services without asking
-- Identify root cause, not just symptoms`
+		return `- Start with the least disruptive diagnostic checks
+- Identify root cause, not surface symptoms
+- Propose fixes with rollback steps`
 	case TaskTypeWorkflow:
-		return `- Each step must have a clear success condition
-- Include error handling for each step
-- Prefer parallel execution where dependencies allow`
+		return `- Each step must have a clear success/failure condition
+- Include error handling and rollback for each step
+- Run independent steps in parallel where dependencies allow`
 	default:
 		return `- Be specific and actionable
-- Structure output for clarity`
+- Structure output clearly with headers
+- Respond directly without preamble`
 	}
 }
 
 func addStructure(text string, taskType TaskType) (string, []string) {
-	// Don't re-structure if already has XML tags
 	lower := strings.ToLower(text)
 	if strings.Contains(lower, "<instructions") || strings.Contains(lower, "<role") {
 		return text, []string{"Prompt already has XML structure — preserved"}
@@ -276,10 +413,21 @@ func addStructure(text string, taskType TaskType) (string, []string) {
 	b.WriteString("</role>\n\n")
 	improvements = append(improvements, "Added <role> tag with task-appropriate persona")
 
-	b.WriteString("<instructions>\n")
-	b.WriteString(strings.TrimSpace(text))
-	b.WriteString("\n</instructions>\n\n")
-	improvements = append(improvements, "Wrapped prompt in <instructions> tags")
+	// Detect if there's a code block or long context that should be separated
+	if codeBlock, query := extractCodeBlock(text); codeBlock != "" {
+		b.WriteString("<context>\n")
+		b.WriteString(codeBlock)
+		b.WriteString("\n</context>\n\n")
+		b.WriteString("<instructions>\n")
+		b.WriteString(strings.TrimSpace(query))
+		b.WriteString("\n</instructions>\n\n")
+		improvements = append(improvements, "Separated code/context block from instructions (long context before query)")
+	} else {
+		b.WriteString("<instructions>\n")
+		b.WriteString(strings.TrimSpace(text))
+		b.WriteString("\n</instructions>\n\n")
+	}
+	improvements = append(improvements, "Wrapped prompt in XML structure tags")
 
 	b.WriteString("<constraints>\n")
 	b.WriteString(constraintsForTaskType(taskType))
@@ -289,20 +437,82 @@ func addStructure(text string, taskType TaskType) (string, []string) {
 	return b.String(), improvements
 }
 
-func reorderContext(text string) string {
-	// If the prompt has a clear context block (multi-line quoted text, code blocks, or
-	// long paragraphs) followed by a short question, move context up and query down.
-	// This is a heuristic — Claude processes long context better when placed before the query.
+// extractCodeBlock detects if the prompt contains a code block (``` delimited) and
+// separates it from the surrounding text. Returns (code, rest) or ("", original).
+func extractCodeBlock(text string) (string, string) {
+	startIdx := strings.Index(text, "```")
+	if startIdx == -1 {
+		return "", text
+	}
+	// Find closing ```
+	endIdx := strings.Index(text[startIdx+3:], "```")
+	if endIdx == -1 {
+		return "", text
+	}
+	endIdx += startIdx + 3 + 3 // adjust for offset + closing ```
 
-	lines := strings.Split(text, "\n")
-	if len(lines) < 5 {
-		return text // too short to reorder
+	codeBlock := text[startIdx:endIdx]
+	rest := strings.TrimSpace(text[:startIdx] + text[endIdx:])
+	if len(rest) < 10 {
+		return "", text // not enough surrounding text to separate
+	}
+	return codeBlock, rest
+}
+
+// --- Stage 5: Self-check injection ---
+
+func injectSelfCheck(text string, taskType TaskType) (string, []string) {
+	lower := strings.ToLower(text)
+	// Don't inject if already has verification language
+	if strings.Contains(lower, "verify") || strings.Contains(lower, "double-check") ||
+		strings.Contains(lower, "self-check") || strings.Contains(lower, "before you finish") {
+		return text, nil
 	}
 
-	// Already structured with XML — don't rearrange
-	if strings.Contains(text, "<context>") || strings.Contains(text, "<instructions>") {
-		return text
+	var check string
+	switch taskType {
+	case TaskTypeCode:
+		check = "\n\n<verification>\nBefore finishing, verify:\n- The code compiles/runs without errors\n- Edge cases are handled (empty input, nil, zero values)\n- Error messages are descriptive\n</verification>"
+	case TaskTypeAnalysis:
+		check = "\n\n<verification>\nBefore finishing, verify:\n- Every claim is supported by specific evidence\n- You have distinguished facts from inferences\n- Alternative interpretations have been considered\n</verification>"
+	case TaskTypeTroubleshooting:
+		check = "\n\n<verification>\nBefore finishing, verify:\n- The proposed fix addresses the root cause, not a symptom\n- Rollback steps are included\n- No other systems are affected by the fix\n</verification>"
+	default:
+		return text, nil
 	}
 
-	return text
+	return text + check, []string{"Injected self-verification checklist for " + string(taskType) + " task"}
+}
+
+// --- Stage 6: Preamble suppression ---
+
+func suppressPreamble(text string, taskType TaskType) (string, []string) {
+	lower := strings.ToLower(text)
+	// Don't add if already has preamble suppression
+	if strings.Contains(lower, "without preamble") || strings.Contains(lower, "respond directly") ||
+		strings.Contains(lower, "no preamble") {
+		return text, nil
+	}
+
+	// Only suppress for task types where direct output is preferred
+	switch taskType {
+	case TaskTypeCode, TaskTypeWorkflow:
+		return text + "\n\nRespond directly without preamble. Do not start with phrases like 'Here is...', 'Sure,...', or 'Based on...'.",
+			[]string{"Added preamble suppression for direct output"}
+	default:
+		return text, nil
+	}
+}
+
+// isAllCaps checks if a word is entirely uppercase (for detection, not replacement)
+func isAllCaps(word string) bool {
+	if len(word) < 3 {
+		return false // skip short words like "I", "A"
+	}
+	for _, r := range word {
+		if !unicode.IsUpper(r) && unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
 }
