@@ -87,12 +87,23 @@ func main() {
 	case "templates":
 		fmt.Print(enhancer.TemplateListSummary())
 
+	case "lint":
+		prompt := strings.Join(args[1:], " ")
+		if prompt == "" {
+			prompt = readStdin()
+		}
+		if prompt == "" {
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver lint <prompt>")
+			os.Exit(1)
+		}
+		runLint(prompt)
+
 	case "hook":
 		// Hook mode: reads JSON from stdin (Claude Code UserPromptSubmit format)
 		runHook()
 
 	case "version":
-		fmt.Println("prompt-improver v0.2.0")
+		fmt.Println("prompt-improver v0.3.0")
 
 	case "help", "--help", "-h":
 		printHelp()
@@ -115,6 +126,16 @@ func runEnhance(prompt, taskType string) {
 func runAnalyze(prompt string) {
 	result := enhancer.Analyze(prompt)
 	data, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(data))
+}
+
+func runLint(prompt string) {
+	results := enhancer.Lint(prompt)
+	if len(results) == 0 {
+		fmt.Println("No issues found.")
+		return
+	}
+	data, _ := json.MarshalIndent(results, "", "  ")
 	fmt.Println(string(data))
 }
 
@@ -177,8 +198,14 @@ func runHook() {
 		return
 	}
 
-	// Enhance the prompt
-	result := enhancer.Enhance(hi.Prompt, "")
+	// Load project-specific config if cwd is set
+	cfg := enhancer.Config{}
+	if hi.Cwd != "" {
+		cfg = enhancer.LoadConfig(hi.Cwd)
+	}
+
+	// Enhance the prompt with config
+	result := enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
 
 	// Build additional context with the enhanced version
 	var context strings.Builder
@@ -235,6 +262,7 @@ USAGE:
   prompt-improver <prompt>                      Enhance a prompt (default)
   prompt-improver enhance <prompt> [--type T]   Enhance with explicit task type
   prompt-improver analyze <prompt>              Score and suggest improvements
+  prompt-improver lint <prompt>                 Deep lint with per-line findings
   prompt-improver template <name> [--var val]   Fill a prompt template
   prompt-improver templates                     List available templates
   prompt-improver hook                          Claude Code hook mode (JSON stdin)

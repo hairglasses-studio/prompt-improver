@@ -43,10 +43,15 @@ type AnalyzeResult struct {
 	TaskType          TaskType `json:"task_type"`
 }
 
-// Enhance runs the full enhancement pipeline on a raw prompt
-func Enhance(raw string, taskType TaskType) EnhanceResult {
+// EnhanceWithConfig runs the full enhancement pipeline with optional project config.
+func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult {
 	if taskType == "" {
-		taskType = Classify(raw)
+		if cfg.DefaultTaskType != "" {
+			taskType = ValidTaskType(cfg.DefaultTaskType)
+		}
+		if taskType == "" {
+			taskType = Classify(raw)
+		}
 	}
 
 	result := EnhanceResult{
@@ -55,57 +60,118 @@ func Enhance(raw string, taskType TaskType) EnhanceResult {
 	}
 
 	text := raw
+	var imps []string
+
+	// Stage 0: Apply config rules (prepend/append based on pattern matches)
+	if len(cfg.Rules) > 0 {
+		text, imps = cfg.ApplyRules(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "config_rules")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
 
 	// Stage 1: Specificity — replace vague phrases with concrete instructions
-	text, specImprovements := improveSpecificity(text)
-	if len(specImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "specificity")
-		result.Improvements = append(result.Improvements, specImprovements...)
+	if !cfg.IsStageDisabled("specificity") {
+		text, imps = improveSpecificity(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "specificity")
+			result.Improvements = append(result.Improvements, imps...)
+		}
 	}
 
 	// Stage 2: Positive reframing — rewrite known negative patterns first
-	text, reframeImprovements := reframeNegatives(text)
-	if len(reframeImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "positive_reframe")
-		result.Improvements = append(result.Improvements, reframeImprovements...)
+	if !cfg.IsStageDisabled("positive_reframe") {
+		text, imps = reframeNegatives(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "positive_reframe")
+			result.Improvements = append(result.Improvements, imps...)
+		}
 	}
 
 	// Stage 3: Tone — downgrade remaining aggressive ALL-CAPS for Claude 4.x
-	text, toneImprovements := downgradeTone(text)
-	if len(toneImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "tone_downgrade")
-		result.Improvements = append(result.Improvements, toneImprovements...)
+	if !cfg.IsStageDisabled("tone_downgrade") {
+		text, imps = downgradeTone(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "tone_downgrade")
+			result.Improvements = append(result.Improvements, imps...)
+		}
 	}
 
-	// Stage 4: Structure — wrap in XML tags based on task type
-	// Skip for short, single-purpose prompts (over-tagging prevention)
-	text, structImprovements := addStructure(text, taskType)
-	result.StagesRun = append(result.StagesRun, "structure")
-	result.Improvements = append(result.Improvements, structImprovements...)
-
-	// Stage 5: Format enforcement — detect output format requests and inject <output_format>
-	text, formatImprovements := enforceOutputFormat(text)
-	if len(formatImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "format_enforcement")
-		result.Improvements = append(result.Improvements, formatImprovements...)
+	// Stage 4: Example detection — wrap bare Input/Output pairs in <example> tags
+	if !cfg.IsStageDisabled("examples") {
+		text, imps = DetectAndWrapExamples(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "example_wrapping")
+			result.Improvements = append(result.Improvements, imps...)
+		}
 	}
 
-	// Stage 6: Self-check — inject verification for code/math/analysis
-	text, checkImprovements := injectSelfCheck(text, taskType)
-	if len(checkImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "self_check")
-		result.Improvements = append(result.Improvements, checkImprovements...)
+	// Stage 5: Structure — wrap in XML tags based on task type
+	if !cfg.IsStageDisabled("structure") {
+		text, imps = addStructure(text, taskType)
+		result.StagesRun = append(result.StagesRun, "structure")
+		result.Improvements = append(result.Improvements, imps...)
 	}
 
-	// Stage 7: Preamble suppression — add direct response instruction
-	text, preambleImprovements := suppressPreamble(text, taskType)
-	if len(preambleImprovements) > 0 {
-		result.StagesRun = append(result.StagesRun, "preamble_suppression")
-		result.Improvements = append(result.Improvements, preambleImprovements...)
+	// Stage 6: Long-context reordering — move bulk context before query
+	if !cfg.IsStageDisabled("context_reorder") {
+		text, imps = ReorderLongContext(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "context_reorder")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 7: Format enforcement — detect output format requests
+	if !cfg.IsStageDisabled("format_enforcement") {
+		text, imps = enforceOutputFormat(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "format_enforcement")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 8: Quote grounding — inject "find quotes first" for long-context analysis
+	if !cfg.IsStageDisabled("quote_grounding") {
+		text, imps = InjectQuoteGrounding(text, taskType)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "quote_grounding")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 9: Self-check — inject verification for code/math/analysis
+	if !cfg.IsStageDisabled("self_check") {
+		text, imps = injectSelfCheck(text, taskType)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "self_check")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 10: Preamble suppression — add direct response instruction
+	if !cfg.IsStageDisabled("preamble_suppression") {
+		text, imps = suppressPreamble(text, taskType)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "preamble_suppression")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Prepend config preamble if set
+	if cfg.Preamble != "" {
+		text = cfg.Preamble + "\n\n" + text
+		result.Improvements = append(result.Improvements, "Prepended project-specific preamble from config")
 	}
 
 	result.Enhanced = text
 	return result
+}
+
+// Enhance runs the full enhancement pipeline on a raw prompt (no config).
+func Enhance(raw string, taskType TaskType) EnhanceResult {
+	return EnhanceWithConfig(raw, taskType, Config{})
 }
 
 // Analyze scores a prompt and returns improvement suggestions
