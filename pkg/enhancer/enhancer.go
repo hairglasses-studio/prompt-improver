@@ -10,13 +10,14 @@
 // - Few-shot example wrapping in <examples><example> tags
 // - Self-check injection for code/math/analysis tasks
 // - Preamble suppression for direct output
+// - Format enforcement for JSON/YAML/code output requests
+// - Over-tagging prevention for short single-purpose prompts
 package enhancer
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // EnhanceResult holds the output of the enhancement pipeline
@@ -77,18 +78,26 @@ func Enhance(raw string, taskType TaskType) EnhanceResult {
 	}
 
 	// Stage 4: Structure — wrap in XML tags based on task type
+	// Skip for short, single-purpose prompts (over-tagging prevention)
 	text, structImprovements := addStructure(text, taskType)
 	result.StagesRun = append(result.StagesRun, "structure")
 	result.Improvements = append(result.Improvements, structImprovements...)
 
-	// Stage 5: Self-check — inject verification for code/math/analysis
+	// Stage 5: Format enforcement — detect output format requests and inject <output_format>
+	text, formatImprovements := enforceOutputFormat(text)
+	if len(formatImprovements) > 0 {
+		result.StagesRun = append(result.StagesRun, "format_enforcement")
+		result.Improvements = append(result.Improvements, formatImprovements...)
+	}
+
+	// Stage 6: Self-check — inject verification for code/math/analysis
 	text, checkImprovements := injectSelfCheck(text, taskType)
 	if len(checkImprovements) > 0 {
 		result.StagesRun = append(result.StagesRun, "self_check")
 		result.Improvements = append(result.Improvements, checkImprovements...)
 	}
 
-	// Stage 6: Preamble suppression — add direct response instruction
+	// Stage 7: Preamble suppression — add direct response instruction
 	text, preambleImprovements := suppressPreamble(text, taskType)
 	if len(preambleImprovements) > 0 {
 		result.StagesRun = append(result.StagesRun, "preamble_suppression")
@@ -265,77 +274,39 @@ func improveSpecificity(text string) (string, []string) {
 	return text, improvements
 }
 
-// --- Stage 2: Tone downgrade (Claude 4.x best practice) ---
-
-// aggressiveCapsPattern detects ALL-CAPS emphasis words
-var aggressiveCapsPattern = regexp.MustCompile(`\b(CRITICAL|IMPORTANT|MUST|ALWAYS|NEVER|WARNING|REQUIRED|MANDATORY|ABSOLUTELY|ESSENTIAL)\b`)
-
-// aggressiveCapsReplacements maps ALL-CAPS to normal case
-var aggressiveCapsReplacements = map[string]string{
-	"CRITICAL":    "critical",
-	"IMPORTANT":   "important",
-	"MUST":        "must",
-	"ALWAYS":      "always",
-	"NEVER":       "never",
-	"WARNING":     "warning",
-	"REQUIRED":    "required",
-	"MANDATORY":   "required",
-	"ABSOLUTELY":  "",
-	"ESSENTIAL":   "essential",
-}
-
-func downgradeTone(text string) (string, []string) {
-	var improvements []string
-
-	matches := aggressiveCapsPattern.FindAllString(text, -1)
-	if len(matches) == 0 {
-		return text, nil
-	}
-
-	for _, match := range matches {
-		replacement, ok := aggressiveCapsReplacements[match]
-		if !ok {
-			continue
-		}
-		if replacement == "" {
-			// Remove the word entirely (with trailing space)
-			text = strings.Replace(text, match+" ", "", 1)
-			text = strings.Replace(text, " "+match, "", 1)
-		} else {
-			text = strings.Replace(text, match, replacement, 1)
-		}
-	}
-
-	improvements = append(improvements, fmt.Sprintf("Downgraded %d aggressive ALL-CAPS words to normal case (Claude 4.x best practice)", len(matches)))
-	return text, improvements
-}
-
-// --- Stage 3: Negative-to-positive reframing ---
+// --- Stage 2: Negative-to-positive reframing ---
 
 var negativePattern = regexp.MustCompile(`(?i)\b(NEVER|DO NOT|DON'T|MUST NOT|SHOULD NOT|CANNOT|CAN'T)\b`)
 
-// negativeReframings maps common negative instructions to positive alternatives
+// safetyNegativePattern matches safety-critical negatives that should NOT be reframed
+var safetyNegativePattern = regexp.MustCompile(`(?i)\b(never|do\s+not|must\s+not)\s+(provide|generate|create|produce|reveal|disclose|log|store|execute|run|delete|drop|rm\s+-rf)\s+.*(harm|weapon|illegal|credential|password|secret|PII|personal.?data|private.?key|token|database)`)
+
 var negativeReframings = map[string]string{
-	"never use bullet points":     "Write in flowing prose paragraphs",
-	"don't use markdown":          "Write in plain text with clear paragraph breaks",
-	"do not use markdown":         "Write in plain text with clear paragraph breaks",
-	"never use markdown":          "Write in plain text with clear paragraph breaks",
-	"never use emojis":            "Write using text only, without decorative symbols",
-	"don't make assumptions":      "Ask clarifying questions when information is missing",
-	"do not make assumptions":     "Ask clarifying questions when information is missing",
-	"don't guess":                 "State when you are uncertain and ask for clarification",
-	"do not guess":                "State when you are uncertain and ask for clarification",
-	"never hallucinate":           "Only include information you can verify from the provided context",
-	"don't be verbose":            "Limit each point to one sentence",
-	"do not be verbose":           "Limit each point to one sentence",
-	"don't overthink":             "Choose an approach and commit to it",
-	"do not overthink":            "Choose an approach and commit to it",
-	"never skip steps":            "Show each step of your work",
-	"don't repeat yourself":       "State each point once, clearly",
-	"do not repeat yourself":      "State each point once, clearly",
+	"never use bullet points": "Write in flowing prose paragraphs",
+	"don't use markdown":      "Write in plain text with clear paragraph breaks",
+	"do not use markdown":     "Write in plain text with clear paragraph breaks",
+	"never use markdown":      "Write in plain text with clear paragraph breaks",
+	"never use emojis":        "Write using text only, without decorative symbols",
+	"don't make assumptions":  "Ask clarifying questions when information is missing",
+	"do not make assumptions": "Ask clarifying questions when information is missing",
+	"don't guess":             "State when you are uncertain and ask for clarification",
+	"do not guess":            "State when you are uncertain and ask for clarification",
+	"never hallucinate":       "Only include information you can verify from the provided context",
+	"don't be verbose":        "Limit each point to one sentence",
+	"do not be verbose":       "Limit each point to one sentence",
+	"don't overthink":         "Choose an approach and commit to it",
+	"do not overthink":        "Choose an approach and commit to it",
+	"never skip steps":        "Show each step of your work",
+	"don't repeat yourself":   "State each point once, clearly",
+	"do not repeat yourself":  "State each point once, clearly",
 }
 
 func reframeNegatives(text string) (string, []string) {
+	// Skip safety-critical negatives entirely
+	if safetyNegativePattern.MatchString(text) {
+		return text, nil
+	}
+
 	lower := strings.ToLower(text)
 	var improvements []string
 
@@ -350,7 +321,75 @@ func reframeNegatives(text string) (string, []string) {
 	return text, improvements
 }
 
-// --- Stage 4: XML Structure ---
+// --- Stage 3: Tone downgrade (Claude 4.x best practice) ---
+
+// aggressiveCapsPattern detects ALL-CAPS emphasis words (not acronyms)
+var aggressiveCapsPattern = regexp.MustCompile(`\b(CRITICAL|IMPORTANT|MUST|ALWAYS|NEVER|WARNING|REQUIRED|MANDATORY|ABSOLUTELY|ESSENTIAL)\b`)
+
+// acronymWhitelist contains ALL-CAPS words that are acronyms, not emphasis
+var acronymWhitelist = map[string]bool{
+	"API": true, "URL": true, "HTTP": true, "HTTPS": true,
+	"JSON": true, "XML": true, "HTML": true, "CSS": true,
+	"SQL": true, "SSH": true, "TCP": true, "UDP": true,
+	"DNS": true, "TLS": true, "SSL": true, "JWT": true,
+	"UUID": true, "URI": true, "REST": true, "GRPC": true,
+	"MCP": true, "SSE": true, "MIDI": true, "NDI": true,
+	"OTEL": true, "PII": true, "YAML": true, "TOML": true,
+	"CI": true, "CD": true, "PR": true, "UI": true,
+	"OS": true, "IO": true, "ID": true, "OK": true,
+	"BPM": true, "OSC": true, "DMX": true, "OBS": true,
+	"AWS": true, "GCP": true, "CLI": true, "SDK": true,
+	"CSV": true, "PDF": true, "PNG": true, "JPG": true,
+	"EOF": true, "NULL": true, "TRUE": true, "FALSE": true,
+}
+
+var aggressiveCapsReplacements = map[string]string{
+	"CRITICAL":   "critical",
+	"IMPORTANT":  "important",
+	"MUST":       "must",
+	"ALWAYS":     "always",
+	"NEVER":      "never",
+	"WARNING":    "warning",
+	"REQUIRED":   "required",
+	"MANDATORY":  "required",
+	"ABSOLUTELY": "",
+	"ESSENTIAL":  "essential",
+}
+
+func downgradeTone(text string) (string, []string) {
+	var improvements []string
+
+	matches := aggressiveCapsPattern.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return text, nil
+	}
+
+	downgraded := 0
+	for _, match := range matches {
+		// Skip acronyms
+		if acronymWhitelist[match] {
+			continue
+		}
+		replacement, ok := aggressiveCapsReplacements[match]
+		if !ok {
+			continue
+		}
+		if replacement == "" {
+			text = strings.Replace(text, match+" ", "", 1)
+			text = strings.Replace(text, " "+match, "", 1)
+		} else {
+			text = strings.Replace(text, match, replacement, 1)
+		}
+		downgraded++
+	}
+
+	if downgraded > 0 {
+		improvements = append(improvements, fmt.Sprintf("Downgraded %d aggressive ALL-CAPS words to normal case (Claude 4.x best practice — overtriggers on aggressive language)", downgraded))
+	}
+	return text, improvements
+}
+
+// --- Stage 4: XML Structure (with over-tagging prevention) ---
 
 func roleForTaskType(tt TaskType) string {
 	switch tt {
@@ -399,10 +438,26 @@ func constraintsForTaskType(tt TaskType) string {
 	}
 }
 
-func addStructure(text string, taskType TaskType) (string, []string) {
+// shouldAddStructure implements over-tagging prevention.
+// Anthropic docs: "Tags help most when prompts mix instructions, context, examples, and variable inputs."
+// Simple, short, single-purpose prompts should NOT get XML tags — they add noise.
+func shouldAddStructure(text string) bool {
+	words := strings.Fields(text)
+	// Too short — XML tags would be noise
+	if len(words) < 15 {
+		return false
+	}
+	// Already has XML tags
 	lower := strings.ToLower(text)
 	if strings.Contains(lower, "<instructions") || strings.Contains(lower, "<role") {
-		return text, []string{"Prompt already has XML structure — preserved"}
+		return false
+	}
+	return true
+}
+
+func addStructure(text string, taskType TaskType) (string, []string) {
+	if !shouldAddStructure(text) {
+		return text, []string{"Prompt is short/simple — skipped XML wrapping (over-tagging prevention)"}
 	}
 
 	var b strings.Builder
@@ -421,7 +476,7 @@ func addStructure(text string, taskType TaskType) (string, []string) {
 		b.WriteString("<instructions>\n")
 		b.WriteString(strings.TrimSpace(query))
 		b.WriteString("\n</instructions>\n\n")
-		improvements = append(improvements, "Separated code/context block from instructions (long context before query)")
+		improvements = append(improvements, "Separated code/context block from instructions (long context before query — up to 30% quality improvement per Anthropic)")
 	} else {
 		b.WriteString("<instructions>\n")
 		b.WriteString(strings.TrimSpace(text))
@@ -444,26 +499,65 @@ func extractCodeBlock(text string) (string, string) {
 	if startIdx == -1 {
 		return "", text
 	}
-	// Find closing ```
 	endIdx := strings.Index(text[startIdx+3:], "```")
 	if endIdx == -1 {
 		return "", text
 	}
-	endIdx += startIdx + 3 + 3 // adjust for offset + closing ```
+	endIdx += startIdx + 3 + 3
 
 	codeBlock := text[startIdx:endIdx]
 	rest := strings.TrimSpace(text[:startIdx] + text[endIdx:])
 	if len(rest) < 10 {
-		return "", text // not enough surrounding text to separate
+		return "", text
 	}
 	return codeBlock, rest
 }
 
-// --- Stage 5: Self-check injection ---
+// --- Stage 5: Format enforcement ---
+
+// Format detection patterns (from Anthropic docs: positive format instructions work best)
+var (
+	jsonFormatPattern = regexp.MustCompile(`(?i)\b(json|JSON)\b.*(output|response|format|return|respond)|return\s+(?:as\s+)?json|(as|in)\s+json`)
+	yamlFormatPattern = regexp.MustCompile(`(?i)\b(yaml|YAML)\b.*(output|response|format|return)|(as|in)\s+yaml`)
+	codeFormatPattern = regexp.MustCompile(`(?i)^(write|create|implement|generate)\s+(a\s+)?(function|class|method|script|program|module)\b`)
+	csvFormatPattern  = regexp.MustCompile(`(?i)\b(csv|CSV)\b.*(output|response|format|return)|(as|in)\s+csv`)
+)
+
+func enforceOutputFormat(text string) (string, []string) {
+	lower := strings.ToLower(text)
+
+	// Already has format specification
+	if strings.Contains(lower, "<output_format>") || strings.Contains(lower, "output_format") {
+		return text, nil
+	}
+
+	var formatBlock string
+	var desc string
+
+	switch {
+	case jsonFormatPattern.MatchString(text):
+		formatBlock = "\n\n<output_format>\nYour entire response must be valid JSON. Do not wrap it in markdown code fences. Do not include any text before or after the JSON. The response must parse with a standard JSON parser.\n</output_format>"
+		desc = "Injected JSON format enforcement in <output_format> tags"
+	case yamlFormatPattern.MatchString(text):
+		formatBlock = "\n\n<output_format>\nYour entire response must be valid YAML. Do not wrap it in markdown code fences. Do not include any text before or after the YAML.\n</output_format>"
+		desc = "Injected YAML format enforcement in <output_format> tags"
+	case csvFormatPattern.MatchString(text):
+		formatBlock = "\n\n<output_format>\nYour entire response must be valid CSV. Include a header row. Do not wrap in code fences or include any text before or after the CSV data.\n</output_format>"
+		desc = "Injected CSV format enforcement in <output_format> tags"
+	case codeFormatPattern.MatchString(text):
+		formatBlock = "\n\n<output_format>\nReturn only the code. Do not include markdown code fences unless explicitly asked. Do not include explanatory text before or after the code unless asked.\n</output_format>"
+		desc = "Injected code format enforcement in <output_format> tags"
+	default:
+		return text, nil
+	}
+
+	return text + formatBlock, []string{desc}
+}
+
+// --- Stage 6: Self-check injection ---
 
 func injectSelfCheck(text string, taskType TaskType) (string, []string) {
 	lower := strings.ToLower(text)
-	// Don't inject if already has verification language
 	if strings.Contains(lower, "verify") || strings.Contains(lower, "double-check") ||
 		strings.Contains(lower, "self-check") || strings.Contains(lower, "before you finish") {
 		return text, nil
@@ -484,17 +578,15 @@ func injectSelfCheck(text string, taskType TaskType) (string, []string) {
 	return text + check, []string{"Injected self-verification checklist for " + string(taskType) + " task"}
 }
 
-// --- Stage 6: Preamble suppression ---
+// --- Stage 7: Preamble suppression ---
 
 func suppressPreamble(text string, taskType TaskType) (string, []string) {
 	lower := strings.ToLower(text)
-	// Don't add if already has preamble suppression
 	if strings.Contains(lower, "without preamble") || strings.Contains(lower, "respond directly") ||
 		strings.Contains(lower, "no preamble") {
 		return text, nil
 	}
 
-	// Only suppress for task types where direct output is preferred
 	switch taskType {
 	case TaskTypeCode, TaskTypeWorkflow:
 		return text + "\n\nRespond directly without preamble. Do not start with phrases like 'Here is...', 'Sure,...', or 'Based on...'.",
@@ -502,17 +594,4 @@ func suppressPreamble(text string, taskType TaskType) (string, []string) {
 	default:
 		return text, nil
 	}
-}
-
-// isAllCaps checks if a word is entirely uppercase (for detection, not replacement)
-func isAllCaps(word string) bool {
-	if len(word) < 3 {
-		return false // skip short words like "I", "A"
-	}
-	for _, r := range word {
-		if !unicode.IsUpper(r) && unicode.IsLetter(r) {
-			return false
-		}
-	}
-	return true
 }

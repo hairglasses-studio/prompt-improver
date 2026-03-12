@@ -1,7 +1,8 @@
 // prompt-improver is a CLI tool that enhances prompts with XML structure,
 // specificity improvements, and task-type-aware formatting.
 //
-// Designed to run as a Claude Code hook on PreToolUse or as a standalone CLI.
+// Designed to run as a Claude Code UserPromptSubmit hook for automatic
+// prompt enhancement, or as a standalone CLI.
 //
 // Usage:
 //
@@ -10,6 +11,7 @@
 //	prompt-improver analyze "fix this bug"
 //	prompt-improver template troubleshoot --system resolume --symptoms "clips stuck"
 //	prompt-improver templates
+//	prompt-improver hook  (reads Claude Code UserPromptSubmit JSON from stdin)
 package main
 
 import (
@@ -25,7 +27,7 @@ import (
 func main() {
 	args := os.Args[1:]
 
-	// If no args and stdin has data, read from stdin (hook mode)
+	// If no args and stdin has data, read from stdin (pipe mode)
 	if len(args) == 0 {
 		input, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -86,11 +88,11 @@ func main() {
 		fmt.Print(enhancer.TemplateListSummary())
 
 	case "hook":
-		// Hook mode: reads JSON from stdin (Claude Code hook format)
+		// Hook mode: reads JSON from stdin (Claude Code UserPromptSubmit format)
 		runHook()
 
 	case "version":
-		fmt.Println("prompt-improver v0.1.0")
+		fmt.Println("prompt-improver v0.2.0")
 
 	case "help", "--help", "-h":
 		printHelp()
@@ -131,21 +133,36 @@ func runTemplate(name string, args []string) {
 	fmt.Println(filled)
 }
 
+// hookInput is the JSON Claude Code sends to UserPromptSubmit hooks on stdin
+type hookInput struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Cwd            string `json:"cwd"`
+	PermissionMode string `json:"permission_mode"`
+	HookEventName  string `json:"hook_event_name"`
+	Prompt         string `json:"prompt"`
+}
+
+// hookOutput is the JSON response for UserPromptSubmit hooks
+type hookOutput struct {
+	HookSpecificOutput *hookSpecificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+type hookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
 func runHook() {
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		os.Exit(1)
+		os.Exit(1) // non-blocking error, prompt proceeds
 	}
 
-	// Claude Code hook format: JSON with tool_name, tool_input, etc.
-	var hookInput struct {
-		ToolName  string                 `json:"tool_name"`
-		ToolInput map[string]interface{} `json:"tool_input"`
-	}
-
-	if err := json.Unmarshal(input, &hookInput); err != nil {
-		// Not JSON — treat as raw prompt
+	var hi hookInput
+	if err := json.Unmarshal(input, &hi); err != nil {
+		// Not JSON — treat as raw prompt text
 		raw := strings.TrimSpace(string(input))
 		if raw != "" {
 			result := enhancer.Enhance(raw, "")
@@ -154,25 +171,37 @@ func runHook() {
 		return
 	}
 
-	// Look for prompt-like fields in the tool input
-	promptFields := []string{"prompt", "message", "text", "query", "content", "input"}
-	for _, field := range promptFields {
-		if val, ok := hookInput.ToolInput[field]; ok {
-			if str, ok := val.(string); ok && len(str) > 10 {
-				result := enhancer.Enhance(str, "")
-				// Output modified tool input
-				hookInput.ToolInput[field] = result.Enhanced
-				data, _ := json.Marshal(map[string]interface{}{
-					"tool_input": hookInput.ToolInput,
-				})
-				fmt.Println(string(data))
-				return
-			}
-		}
+	// If no prompt field, pass through
+	if hi.Prompt == "" {
+		os.Exit(0)
+		return
 	}
 
-	// No prompt field found — pass through unchanged
-	fmt.Println("{}")
+	// Enhance the prompt
+	result := enhancer.Enhance(hi.Prompt, "")
+
+	// Build additional context with the enhanced version
+	var context strings.Builder
+	context.WriteString("## Prompt Enhancement Applied\n\n")
+	context.WriteString("The following enhanced version of the prompt incorporates best practices:\n\n")
+	context.WriteString(result.Enhanced)
+	context.WriteString("\n\n### Improvements Made\n")
+	for _, imp := range result.Improvements {
+		fmt.Fprintf(&context, "- %s\n", imp)
+	}
+	fmt.Fprintf(&context, "\nDetected task type: %s\n", result.TaskType)
+
+	// Output structured JSON per Claude Code hook spec
+	out := hookOutput{
+		HookSpecificOutput: &hookSpecificOutput{
+			HookEventName:     "UserPromptSubmit",
+			AdditionalContext: context.String(),
+		},
+	}
+
+	data, _ := json.Marshal(out)
+	fmt.Println(string(data))
+	os.Exit(0)
 }
 
 func readStdin() string {
@@ -217,15 +246,27 @@ TASK TYPES:
 TEMPLATES:
   troubleshoot, code_review, workflow_create, data_analysis, creative_brief
 
-HOOK INTEGRATION:
-  Add to .claude/settings.json:
+CLAUDE CODE HOOK INTEGRATION:
+  Add to .claude/settings.json (project) or ~/.claude/settings.json (global):
+
     {
       "hooks": {
-        "PreToolUse": [{
-          "matcher": "Task",
-          "command": "prompt-improver hook"
-        }]
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "prompt-improver hook",
+                "timeout": 10
+              }
+            ]
+          }
+        ]
       }
     }
+
+  The hook reads the UserPromptSubmit JSON from stdin, enhances the prompt,
+  and returns additionalContext that Claude sees alongside the original prompt.
+  Exit code 0 = proceed, exit code 2 = block the prompt.
 `)
 }
