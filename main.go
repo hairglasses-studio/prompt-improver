@@ -98,12 +98,26 @@ func main() {
 		}
 		runLint(prompt)
 
+	case "cache-check":
+		path := ""
+		if len(args) > 1 {
+			path = args[1]
+		}
+		runCacheCheck(path)
+
+	case "check-claudemd":
+		path := "./CLAUDE.md"
+		if len(args) > 1 {
+			path = args[1]
+		}
+		runCheckClaudeMD(path)
+
 	case "hook":
 		// Hook mode: reads JSON from stdin (Claude Code UserPromptSubmit format)
 		runHook()
 
 	case "version":
-		fmt.Println("prompt-improver v0.3.0")
+		fmt.Println("prompt-improver v1.0.0")
 
 	case "help", "--help", "-h":
 		printHelp()
@@ -133,6 +147,46 @@ func runLint(prompt string) {
 	results := enhancer.Lint(prompt)
 	if len(results) == 0 {
 		fmt.Println("No issues found.")
+		return
+	}
+	data, _ := json.MarshalIndent(results, "", "  ")
+	fmt.Println(string(data))
+}
+
+func runCacheCheck(path string) {
+	var text string
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error reading %s: %v\n", path, err)
+			os.Exit(1)
+		}
+		text = string(data)
+	} else {
+		text = readStdin()
+	}
+	if text == "" {
+		fmt.Fprintln(os.Stderr, "usage: prompt-improver cache-check <file> or pipe via stdin")
+		os.Exit(1)
+	}
+
+	results := enhancer.VerifyCacheFriendlyOrder(text)
+	if len(results) == 0 {
+		fmt.Println("Cache-friendly: no ordering issues found.")
+		return
+	}
+	data, _ := json.MarshalIndent(results, "", "  ")
+	fmt.Println(string(data))
+}
+
+func runCheckClaudeMD(path string) {
+	results, err := enhancer.CheckClaudeMD(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(results) == 0 {
+		fmt.Println("CLAUDE.md looks healthy — no issues found.")
 		return
 	}
 	data, _ := json.MarshalIndent(results, "", "  ")
@@ -256,23 +310,42 @@ func parseFlags(args []string) map[string]string {
 }
 
 func printHelp() {
-	fmt.Print(`prompt-improver — Automatic prompt enhancement CLI
+	fmt.Print(`prompt-improver v1.0.0 — Claude-specific prompt optimization CLI
 
 USAGE:
   prompt-improver <prompt>                      Enhance a prompt (default)
   prompt-improver enhance <prompt> [--type T]   Enhance with explicit task type
-  prompt-improver analyze <prompt>              Score and suggest improvements
+  prompt-improver analyze <prompt>              Score, suggest, estimate tokens & effort
   prompt-improver lint <prompt>                 Deep lint with per-line findings
+  prompt-improver cache-check <file>            Check prompt caching friendliness
+  prompt-improver check-claudemd [path]         CLAUDE.md health check (default: ./CLAUDE.md)
   prompt-improver template <name> [--var val]   Fill a prompt template
   prompt-improver templates                     List available templates
   prompt-improver hook                          Claude Code hook mode (JSON stdin)
   echo "prompt" | prompt-improver               Pipe mode
 
+PIPELINE (13 stages):
+  0  config_rules         Pattern-matched augmentations
+  1  specificity          Replace vague phrases
+  2  positive_reframe     Negative-to-positive reframing
+  3  tone_downgrade       ALL-CAPS → normal case
+  4  overtrigger_rewrite  Soften anti-laziness phrases (Claude 4.x)
+  5  example_wrapping     Wrap bare examples in XML
+  6  structure            Add XML role/instructions/constraints
+  7  context_reorder      Long context before query
+  8  format_enforcement   JSON/YAML/CSV format tags
+  9  quote_grounding      Quote-first for long-context analysis
+  10 self_check           Verification checklists
+  11 overengineering_guard Prevent over-abstraction (code tasks)
+  12 preamble_suppression Direct response instruction
+
 TASK TYPES:
   code, creative, analysis, troubleshooting, workflow, general
 
-TEMPLATES:
-  troubleshoot, code_review, workflow_create, data_analysis, creative_brief
+LINT CHECKS:
+  unmotivated-rule, negative-framing, aggressive-emphasis, vague-quantifier,
+  overtrigger-phrase, over-specification, decomposition-needed, injection-risk,
+  thinking-mode-redundant, example-quality, compaction-readiness
 
 CLAUDE CODE HOOK INTEGRATION:
   Add to .claude/settings.json (project) or ~/.claude/settings.json (global):

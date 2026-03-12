@@ -22,25 +22,30 @@ import (
 
 // EnhanceResult holds the output of the enhancement pipeline
 type EnhanceResult struct {
-	Original     string   `json:"original"`
-	Enhanced     string   `json:"enhanced"`
-	TaskType     TaskType `json:"task_type"`
-	StagesRun    []string `json:"stages_run"`
-	Improvements []string `json:"improvements"`
+	Original        string   `json:"original"`
+	Enhanced        string   `json:"enhanced"`
+	TaskType        TaskType `json:"task_type"`
+	StagesRun       []string `json:"stages_run"`
+	Improvements    []string `json:"improvements"`
+	EstimatedTokens int      `json:"estimated_tokens"`
+	CostTier        string   `json:"cost_tier"`
 }
 
 // AnalyzeResult holds prompt quality analysis
 type AnalyzeResult struct {
-	Score             int      `json:"score"`
-	Suggestions       []string `json:"suggestions"`
-	HasXML            bool     `json:"has_xml_structure"`
-	HasExamples       bool     `json:"has_examples"`
-	HasContext         bool     `json:"has_context"`
-	HasFormat         bool     `json:"has_output_format"`
-	HasNegativeFrames bool     `json:"has_negative_framing"`
-	HasAggressiveCaps bool     `json:"has_aggressive_caps"`
-	WordCount         int      `json:"word_count"`
-	TaskType          TaskType `json:"task_type"`
+	Score              int      `json:"score"`
+	Suggestions        []string `json:"suggestions"`
+	HasXML             bool     `json:"has_xml_structure"`
+	HasExamples        bool     `json:"has_examples"`
+	HasContext          bool     `json:"has_context"`
+	HasFormat          bool     `json:"has_output_format"`
+	HasNegativeFrames  bool     `json:"has_negative_framing"`
+	HasAggressiveCaps  bool     `json:"has_aggressive_caps"`
+	WordCount          int      `json:"word_count"`
+	TaskType           TaskType `json:"task_type"`
+	EstimatedTokens    int      `json:"estimated_tokens"`
+	CostTier           string   `json:"cost_tier"`
+	RecommendedEffort  string   `json:"recommended_effort"`
 }
 
 // EnhanceWithConfig runs the full enhancement pipeline with optional project config.
@@ -98,7 +103,16 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 4: Example detection — wrap bare Input/Output pairs in <example> tags
+	// Stage 4: Overtrigger rewrite — soften aggressive anti-laziness phrases for Claude 4.x
+	if !cfg.IsStageDisabled("overtrigger_rewrite") {
+		text, imps = rewriteOvertriggerPhrases(text)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "overtrigger_rewrite")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 5: Example detection — wrap bare Input/Output pairs in <example> tags
 	if !cfg.IsStageDisabled("examples") {
 		text, imps = DetectAndWrapExamples(text)
 		if len(imps) > 0 {
@@ -107,14 +121,14 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 5: Structure — wrap in XML tags based on task type
+	// Stage 6: Structure — wrap in XML tags based on task type
 	if !cfg.IsStageDisabled("structure") {
 		text, imps = addStructure(text, taskType)
 		result.StagesRun = append(result.StagesRun, "structure")
 		result.Improvements = append(result.Improvements, imps...)
 	}
 
-	// Stage 6: Long-context reordering — move bulk context before query
+	// Stage 7: Long-context reordering — move bulk context before query
 	if !cfg.IsStageDisabled("context_reorder") {
 		text, imps = ReorderLongContext(text)
 		if len(imps) > 0 {
@@ -123,7 +137,7 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 7: Format enforcement — detect output format requests
+	// Stage 8: Format enforcement — detect output format requests
 	if !cfg.IsStageDisabled("format_enforcement") {
 		text, imps = enforceOutputFormat(text)
 		if len(imps) > 0 {
@@ -132,7 +146,7 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 8: Quote grounding — inject "find quotes first" for long-context analysis
+	// Stage 9: Quote grounding — inject "find quotes first" for long-context analysis
 	if !cfg.IsStageDisabled("quote_grounding") {
 		text, imps = InjectQuoteGrounding(text, taskType)
 		if len(imps) > 0 {
@@ -141,7 +155,7 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 9: Self-check — inject verification for code/math/analysis
+	// Stage 10: Self-check — inject verification for code/math/analysis
 	if !cfg.IsStageDisabled("self_check") {
 		text, imps = injectSelfCheck(text, taskType)
 		if len(imps) > 0 {
@@ -150,7 +164,16 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 		}
 	}
 
-	// Stage 10: Preamble suppression — add direct response instruction
+	// Stage 11: Overengineering guard — prevent unnecessary abstractions (code tasks only)
+	if !cfg.IsStageDisabled("overengineering_guard") {
+		text, imps = injectOverengineeringGuard(text, taskType)
+		if len(imps) > 0 {
+			result.StagesRun = append(result.StagesRun, "overengineering_guard")
+			result.Improvements = append(result.Improvements, imps...)
+		}
+	}
+
+	// Stage 12: Preamble suppression — add direct response instruction
 	if !cfg.IsStageDisabled("preamble_suppression") {
 		text, imps = suppressPreamble(text, taskType)
 		if len(imps) > 0 {
@@ -166,6 +189,11 @@ func EnhanceWithConfig(raw string, taskType TaskType, cfg Config) EnhanceResult 
 	}
 
 	result.Enhanced = text
+
+	// Populate token estimate and cost tier
+	result.EstimatedTokens = EstimateTokens(text)
+	result.CostTier = costTierForTokens(result.EstimatedTokens)
+
 	return result
 }
 
@@ -267,6 +295,11 @@ func Analyze(prompt string) AnalyzeResult {
 	if result.HasAggressiveCaps {
 		result.Suggestions = append(result.Suggestions, "Downgrade ALL-CAPS emphasis — Claude 4.x overtriggers on aggressive language like CRITICAL/MUST/IMPORTANT. Normal case is equally effective")
 	}
+
+	// Populate token estimate, cost tier, and recommended effort
+	result.EstimatedTokens = EstimateTokens(prompt)
+	result.CostTier = costTierForTokens(result.EstimatedTokens)
+	result.RecommendedEffort = recommendEffort(prompt, taskType)
 
 	// Task-specific suggestions
 	switch taskType {
@@ -455,7 +488,7 @@ func downgradeTone(text string) (string, []string) {
 	return text, improvements
 }
 
-// --- Stage 4: XML Structure (with over-tagging prevention) ---
+// --- Stage 6: XML Structure (with over-tagging prevention) ---
 
 func roleForTaskType(tt TaskType) string {
 	switch tt {
@@ -579,6 +612,123 @@ func extractCodeBlock(text string) (string, string) {
 	return codeBlock, rest
 }
 
+// --- Stage 4a: Overtrigger phrase rewriting (Claude 4.x) ---
+
+// overtriggerPattern detects aggressive anti-laziness prefixes that cause Claude 4.x to overtrigger.
+// Per Anthropic: "CRITICAL: You MUST use this tool" should become "Use this tool when..."
+var overtriggerPattern = regexp.MustCompile(
+	`(?i)(CRITICAL|IMPORTANT|REQUIRED|WARNING)\s*[:!]\s*(You\s+)?(MUST|ALWAYS|NEVER|SHOULD)\s+`,
+)
+
+func rewriteOvertriggerPhrases(text string) (string, []string) {
+	matches := overtriggerPattern.FindAllStringIndex(text, -1)
+	if len(matches) == 0 {
+		return text, nil
+	}
+
+	var improvements []string
+	count := 0
+	result := overtriggerPattern.ReplaceAllStringFunc(text, func(match string) string {
+		count++
+		// Extract the action verb that follows the aggressive prefix
+		// The pattern captures up to and including "MUST ", "ALWAYS ", etc.
+		// We want to strip the prefix and keep just the verb context
+		lower := strings.ToLower(match)
+		// Find the modal verb position
+		for _, modal := range []string{"must ", "always ", "never ", "should "} {
+			if idx := strings.Index(lower, modal); idx != -1 {
+				verb := strings.TrimSpace(match[idx:])
+				// Convert "MUST do" to "do" or "NEVER do" to "avoid doing" / keep "never"
+				verbLower := strings.ToLower(verb)
+				if strings.HasPrefix(verbLower, "never ") {
+					return "Avoid: " + strings.TrimSpace(verb[6:])
+				}
+				if strings.HasPrefix(verbLower, "must ") {
+					return strings.TrimSpace(verb[5:])
+				}
+				if strings.HasPrefix(verbLower, "always ") {
+					return strings.TrimSpace(verb[7:])
+				}
+				if strings.HasPrefix(verbLower, "should ") {
+					return strings.TrimSpace(verb[7:])
+				}
+			}
+		}
+		return match
+	})
+
+	if count > 0 {
+		improvements = append(improvements, fmt.Sprintf("Rewrote %d overtrigger phrase(s) — Claude 4.x overtriggers on aggressive 'CRITICAL: You MUST' prefixes", count))
+	}
+	return result, improvements
+}
+
+// --- Stage 11: Overengineering guard (Claude 4.x, code tasks only) ---
+
+// overengineeringExemptPattern matches prompts that explicitly request new scaffolding
+var overengineeringExemptPattern = regexp.MustCompile(`(?i)(create\s+new|scaffold|generate\s+boilerplate|set\s+up\s+a\s+new|initialize\s+a\s+new)`)
+
+func injectOverengineeringGuard(text string, taskType TaskType) (string, []string) {
+	if taskType != TaskTypeCode {
+		return text, nil
+	}
+
+	lower := strings.ToLower(text)
+	// Skip if prompt is asking for new creation/scaffolding
+	if overengineeringExemptPattern.MatchString(text) {
+		return text, nil
+	}
+	// Skip if guard already present
+	if strings.Contains(lower, "only make changes that are directly requested") ||
+		strings.Contains(lower, "overengineering") {
+		return text, nil
+	}
+
+	guard := "\n\nOnly make changes that are directly requested or clearly necessary. Prefer editing existing files to creating new ones. Do not add abstractions, helpers, or defensive code for scenarios that cannot happen."
+	return text + guard, []string{"Injected overengineering guard — Claude 4.x tends to over-abstract and create unnecessary files"}
+}
+
+// --- Token budget and cost tier ---
+
+func costTierForTokens(tokens int) string {
+	switch {
+	case tokens < 1_000:
+		return "minimal"
+	case tokens < 10_000:
+		return "small"
+	case tokens < 50_000:
+		return "medium"
+	case tokens < 200_000:
+		return "large"
+	default:
+		return "max-context"
+	}
+}
+
+// --- Effort level recommendation ---
+
+// complexityKeywords indicate prompts that benefit from high effort
+var complexityKeywords = regexp.MustCompile(`(?i)\b(refactor|architecture|across\s+multiple\s+files|redesign|migrate|rewrite|comprehensive|exhaustive|all\s+edge\s+cases|full\s+audit)\b`)
+
+func recommendEffort(prompt string, taskType TaskType) string {
+	words := strings.Fields(prompt)
+	wordCount := len(words)
+	hasComplexity := complexityKeywords.MatchString(prompt)
+
+	// High effort: complex tasks, long prompts, or explicit complexity keywords
+	if hasComplexity || wordCount > 200 {
+		return "high"
+	}
+
+	// Low effort: short general prompts
+	if taskType == TaskTypeGeneral && wordCount < 20 {
+		return "low"
+	}
+
+	// Medium: everything else
+	return "medium"
+}
+
 // --- Stage 5: Format enforcement ---
 
 // Format detection patterns (from Anthropic docs: positive format instructions work best)
@@ -620,7 +770,7 @@ func enforceOutputFormat(text string) (string, []string) {
 	return text + formatBlock, []string{desc}
 }
 
-// --- Stage 6: Self-check injection ---
+// --- Stage 10: Self-check injection ---
 
 func injectSelfCheck(text string, taskType TaskType) (string, []string) {
 	lower := strings.ToLower(text)
@@ -644,7 +794,7 @@ func injectSelfCheck(text string, taskType TaskType) (string, []string) {
 	return text + check, []string{"Injected self-verification checklist for " + string(taskType) + " task"}
 }
 
-// --- Stage 7: Preamble suppression ---
+// --- Stage 12: Preamble suppression ---
 
 func suppressPreamble(text string, taskType TaskType) (string, []string) {
 	lower := strings.ToLower(text)

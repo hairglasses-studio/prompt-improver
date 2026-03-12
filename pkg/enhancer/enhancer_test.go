@@ -333,3 +333,164 @@ func TestValidTaskType(t *testing.T) {
 		t.Error("Should return empty for invalid type")
 	}
 }
+
+// --- Overtrigger rewriting tests ---
+
+func TestEnhance_RewritesOvertriggerPhrase(t *testing.T) {
+	result := Enhance("CRITICAL: You MUST use this tool when processing data in the project codebase", TaskTypeGeneral)
+
+	if strings.Contains(result.Enhanced, "CRITICAL:") {
+		t.Error("Should remove CRITICAL: prefix")
+	}
+	if strings.Contains(result.Enhanced, "You MUST") {
+		t.Error("Should remove 'You MUST' aggressive prefix")
+	}
+
+	found := false
+	for _, imp := range result.Improvements {
+		if strings.Contains(imp, "overtrigger") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Should report overtrigger rewrite improvement")
+	}
+}
+
+func TestEnhance_OvertriggerPreservesAction(t *testing.T) {
+	result := Enhance("IMPORTANT: You SHOULD validate all inputs before processing them in the system", TaskTypeGeneral)
+
+	// The action "validate all inputs" should be preserved
+	if !strings.Contains(strings.ToLower(result.Enhanced), "validate all inputs") {
+		t.Error("Should preserve the action verb and object after rewriting overtrigger phrase")
+	}
+}
+
+func TestEnhance_OvertriggerNever(t *testing.T) {
+	result := Enhance("WARNING: You MUST NEVER expose secrets in the logs for the entire application", TaskTypeGeneral)
+
+	// "NEVER" should be converted to "Avoid:" prefix
+	if strings.Contains(result.Enhanced, "WARNING:") {
+		t.Error("Should remove WARNING: prefix")
+	}
+}
+
+func TestEnhance_NoOvertriggerOnCleanPrompt(t *testing.T) {
+	input := "Use this tool when processing data in the project codebase for better results"
+	result := Enhance(input, TaskTypeGeneral)
+
+	for _, stage := range result.StagesRun {
+		if stage == "overtrigger_rewrite" {
+			t.Error("Should not run overtrigger rewrite on clean prompt")
+		}
+	}
+}
+
+func TestEnhance_OvertriggerMultiple(t *testing.T) {
+	input := "CRITICAL: You MUST follow rule one carefully. IMPORTANT: You SHOULD follow rule two carefully."
+	result := Enhance(input, TaskTypeGeneral)
+
+	if strings.Contains(result.Enhanced, "CRITICAL:") || strings.Contains(result.Enhanced, "IMPORTANT:") {
+		t.Error("Should rewrite multiple overtrigger phrases")
+	}
+}
+
+func TestEnhance_OvertriggerRequired(t *testing.T) {
+	result := Enhance("REQUIRED: You MUST call the API endpoint before returning any data to the client", TaskTypeGeneral)
+
+	if strings.Contains(result.Enhanced, "REQUIRED:") {
+		t.Error("Should rewrite REQUIRED: prefix")
+	}
+}
+
+// --- Overengineering guard tests ---
+
+func TestEnhance_OverengineeringGuard_CodeTask(t *testing.T) {
+	result := Enhance("fix the bug in the user sorting function and make sure edge cases are handled properly", TaskTypeCode)
+
+	if !strings.Contains(result.Enhanced, "Only make changes that are directly requested") {
+		t.Error("Code tasks should get overengineering guard")
+	}
+}
+
+func TestEnhance_OverengineeringGuard_SkipsNonCode(t *testing.T) {
+	result := Enhance("analyze this dataset for trends and patterns in user behavior over time", TaskTypeAnalysis)
+
+	if strings.Contains(result.Enhanced, "Only make changes that are directly requested") {
+		t.Error("Non-code tasks should NOT get overengineering guard")
+	}
+}
+
+func TestEnhance_OverengineeringGuard_SkipsScaffolding(t *testing.T) {
+	result := Enhance("create new project scaffolding with all the required files and directory structure", TaskTypeCode)
+
+	if strings.Contains(result.Enhanced, "Only make changes that are directly requested") {
+		t.Error("Scaffolding prompts should NOT get overengineering guard")
+	}
+}
+
+// --- Token budget estimation tests ---
+
+func TestEnhance_TokenEstimate(t *testing.T) {
+	result := Enhance("write a function to parse JSON data and handle all the edge cases properly in Go", TaskTypeCode)
+
+	if result.EstimatedTokens == 0 {
+		t.Error("Should populate EstimatedTokens")
+	}
+	if result.CostTier == "" {
+		t.Error("Should populate CostTier")
+	}
+}
+
+func TestCostTierForTokens(t *testing.T) {
+	tests := []struct {
+		tokens   int
+		expected string
+	}{
+		{500, "minimal"},
+		{5000, "small"},
+		{30000, "medium"},
+		{100000, "large"},
+		{250000, "max-context"},
+	}
+	for _, tt := range tests {
+		got := costTierForTokens(tt.tokens)
+		if got != tt.expected {
+			t.Errorf("costTierForTokens(%d) = %q, want %q", tt.tokens, got, tt.expected)
+		}
+	}
+}
+
+// --- Effort recommendation tests ---
+
+func TestAnalyze_EffortLow(t *testing.T) {
+	result := Analyze("hello world")
+	if result.RecommendedEffort != "low" {
+		t.Errorf("Short general prompt should recommend 'low' effort, got %q", result.RecommendedEffort)
+	}
+}
+
+func TestAnalyze_EffortMedium(t *testing.T) {
+	result := Analyze("write a function to sort users by name using Go with error handling")
+	if result.RecommendedEffort != "medium" {
+		t.Errorf("Simple code prompt should recommend 'medium' effort, got %q", result.RecommendedEffort)
+	}
+}
+
+func TestAnalyze_EffortHigh(t *testing.T) {
+	result := Analyze("refactor the entire authentication module across multiple files to use JWT tokens")
+	if result.RecommendedEffort != "high" {
+		t.Errorf("Complex refactor should recommend 'high' effort, got %q", result.RecommendedEffort)
+	}
+}
+
+func TestAnalyze_TokenEstimate(t *testing.T) {
+	result := Analyze("analyze this code for performance issues and suggest improvements")
+	if result.EstimatedTokens == 0 {
+		t.Error("Should populate EstimatedTokens in AnalyzeResult")
+	}
+	if result.CostTier == "" {
+		t.Error("Should populate CostTier in AnalyzeResult")
+	}
+}
