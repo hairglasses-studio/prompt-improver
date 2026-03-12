@@ -58,7 +58,6 @@ func TestEnhance_PreservesExistingStructure(t *testing.T) {
 	if !strings.Contains(result.Enhanced, "<role>You are a test bot.") {
 		t.Error("Should preserve existing XML structure")
 	}
-	// Should NOT double-wrap
 	if strings.Count(result.Enhanced, "<role>") > 1 {
 		t.Error("Should not add duplicate <role> tags")
 	}
@@ -75,6 +74,84 @@ func TestEnhance_ImprovesSpecificity(t *testing.T) {
 	}
 	if len(result.Improvements) == 0 {
 		t.Error("Should report improvements made")
+	}
+}
+
+func TestEnhance_DowngradesAggressiveCaps(t *testing.T) {
+	result := Enhance("CRITICAL: You MUST ALWAYS follow this rule", TaskTypeGeneral)
+
+	if strings.Contains(result.Enhanced, "CRITICAL") {
+		t.Error("Should downgrade CRITICAL to normal case")
+	}
+	if strings.Contains(result.Enhanced, "MUST") {
+		t.Error("Should downgrade MUST to normal case")
+	}
+
+	found := false
+	for _, imp := range result.Improvements {
+		if strings.Contains(imp, "Downgraded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Should report tone downgrade improvement")
+	}
+}
+
+func TestEnhance_ReframesNegatives(t *testing.T) {
+	result := Enhance("never use bullet points in the response", TaskTypeGeneral)
+
+	if strings.Contains(strings.ToLower(result.Enhanced), "never use bullet points") {
+		t.Error("Should reframe 'never use bullet points' to positive")
+	}
+	if !strings.Contains(result.Enhanced, "flowing prose") {
+		t.Error("Should contain positive alternative")
+	}
+}
+
+func TestEnhance_InjectsSelfCheck(t *testing.T) {
+	result := Enhance("write a function to parse JSON", TaskTypeCode)
+
+	if !strings.Contains(result.Enhanced, "<verification>") {
+		t.Error("Code tasks should get self-verification injection")
+	}
+	if !strings.Contains(result.Enhanced, "Edge cases") {
+		t.Error("Code verification should mention edge cases")
+	}
+}
+
+func TestEnhance_SuppressesPreamble(t *testing.T) {
+	result := Enhance("write a function to parse JSON", TaskTypeCode)
+
+	if !strings.Contains(result.Enhanced, "without preamble") {
+		t.Error("Code tasks should get preamble suppression")
+	}
+}
+
+func TestEnhance_NoPreambleSuppressionForAnalysis(t *testing.T) {
+	result := Enhance("analyze this dataset for trends", TaskTypeAnalysis)
+
+	if strings.Contains(result.Enhanced, "without preamble") {
+		t.Error("Analysis tasks should NOT get preamble suppression")
+	}
+}
+
+func TestEnhance_SeparatesCodeBlocks(t *testing.T) {
+	input := "Review this function:\n```go\nfunc hello() {\n\tfmt.Println(\"hi\")\n}\n```\nIs it correct?"
+	result := Enhance(input, TaskTypeAnalysis)
+
+	if !strings.Contains(result.Enhanced, "<context>") {
+		t.Error("Should separate code block into <context>")
+	}
+}
+
+func TestEnhance_PipelineStages(t *testing.T) {
+	result := Enhance("CRITICAL: fix this and make it good", TaskTypeTroubleshooting)
+
+	// Should run multiple stages
+	if len(result.StagesRun) < 3 {
+		t.Errorf("Expected at least 3 stages, got %d: %v", len(result.StagesRun), result.StagesRun)
 	}
 }
 
@@ -104,6 +181,27 @@ Focus on nil pointer dereferences and unchecked errors.</instructions>
 	}
 	if !good.HasExamples {
 		t.Error("Should detect examples")
+	}
+}
+
+func TestAnalyze_DetectsNegativeFraming(t *testing.T) {
+	result := Analyze("NEVER use markdown. DO NOT include bullet points.")
+	if !result.HasNegativeFrames {
+		t.Error("Should detect negative framing")
+	}
+	if !result.HasAggressiveCaps {
+		t.Error("Should detect aggressive caps")
+	}
+
+	found := false
+	for _, s := range result.Suggestions {
+		if strings.Contains(s, "Reframe negative") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Should suggest reframing negatives")
 	}
 }
 
@@ -151,7 +249,6 @@ func TestFillTemplate(t *testing.T) {
 	if strings.Contains(filled, "{{system}}") {
 		t.Error("Should not have unfilled placeholders for provided vars")
 	}
-	// context was not provided, should show "(not specified)"
 	if !strings.Contains(filled, "(not specified)") {
 		t.Error("Missing variables should show (not specified)")
 	}
