@@ -33,19 +33,20 @@ type EnhanceResult struct {
 
 // AnalyzeResult holds prompt quality analysis
 type AnalyzeResult struct {
-	Score              int      `json:"score"`
-	Suggestions        []string `json:"suggestions"`
-	HasXML             bool     `json:"has_xml_structure"`
-	HasExamples        bool     `json:"has_examples"`
-	HasContext          bool     `json:"has_context"`
-	HasFormat          bool     `json:"has_output_format"`
-	HasNegativeFrames  bool     `json:"has_negative_framing"`
-	HasAggressiveCaps  bool     `json:"has_aggressive_caps"`
-	WordCount          int      `json:"word_count"`
-	TaskType           TaskType `json:"task_type"`
-	EstimatedTokens    int      `json:"estimated_tokens"`
-	CostTier           string   `json:"cost_tier"`
-	RecommendedEffort  string   `json:"recommended_effort"`
+	Score              int          `json:"score"`
+	ScoreReport        *ScoreReport `json:"score_report"`
+	Suggestions        []string     `json:"suggestions"`
+	HasXML             bool         `json:"has_xml_structure"`
+	HasExamples        bool         `json:"has_examples"`
+	HasContext          bool         `json:"has_context"`
+	HasFormat          bool         `json:"has_output_format"`
+	HasNegativeFrames  bool         `json:"has_negative_framing"`
+	HasAggressiveCaps  bool         `json:"has_aggressive_caps"`
+	WordCount          int          `json:"word_count"`
+	TaskType           TaskType     `json:"task_type"`
+	EstimatedTokens    int          `json:"estimated_tokens"`
+	CostTier           string       `json:"cost_tier"`
+	RecommendedEffort  string       `json:"recommended_effort"`
 }
 
 // EnhanceWithConfig runs the full enhancement pipeline with optional project config.
@@ -223,52 +224,13 @@ func Analyze(prompt string) AnalyzeResult {
 	result.HasNegativeFrames = negativePattern.MatchString(prompt)
 	result.HasAggressiveCaps = aggressiveCapsPattern.MatchString(prompt)
 
-	// Score (1-10)
-	score := 3 // baseline for any non-empty prompt
-
-	if result.HasXML {
-		score += 2
-	}
-	if result.HasExamples {
-		score += 1
-	}
-	if result.HasContext {
-		score += 1
-	}
-	if result.HasFormat {
-		score += 1
-	}
-	if len(words) > 20 {
-		score += 1
-	}
-	if len(words) > 50 {
-		score += 1
-	}
-
-	// Deductions
+	// Count vague phrases for suggestions
 	vagueCount := 0
 	for pattern := range vagueReplacements {
 		if strings.Contains(lower, pattern) {
 			vagueCount++
 		}
 	}
-	if vagueCount > 2 {
-		score--
-	}
-	if result.HasNegativeFrames {
-		score--
-	}
-	if result.HasAggressiveCaps {
-		score--
-	}
-
-	if score > 10 {
-		score = 10
-	}
-	if score < 1 {
-		score = 1
-	}
-	result.Score = score
 
 	// Suggestions
 	if !result.HasXML {
@@ -300,6 +262,22 @@ func Analyze(prompt string) AnalyzeResult {
 	result.EstimatedTokens = EstimateTokens(prompt)
 	result.CostTier = costTierForTokens(result.EstimatedTokens)
 	result.RecommendedEffort = recommendEffort(prompt, taskType)
+
+	// Multi-dimensional scoring
+	allLints := Lint(prompt)
+	allLints = append(allLints, VerifyCacheFriendlyOrder(prompt)...)
+	report := Score(prompt, taskType, allLints, &result)
+	result.ScoreReport = report
+
+	// Derive legacy score from overall
+	legacyScore := report.Overall / 10
+	if legacyScore < 1 {
+		legacyScore = 1
+	}
+	if legacyScore > 10 {
+		legacyScore = 10
+	}
+	result.Score = legacyScore
 
 	// Task-specific suggestions
 	switch taskType {
