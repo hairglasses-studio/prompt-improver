@@ -112,9 +112,18 @@ func main() {
 		}
 		runCheckClaudeMD(path)
 
+	case "mcp":
+		runMCP()
+
 	case "hook":
 		// Hook mode: reads JSON from stdin (Claude Code UserPromptSubmit format)
 		runHook()
+
+	case "install":
+		runInstall(args[1:])
+
+	case "uninstall":
+		runUninstall(args[1:])
 
 	case "version":
 		fmt.Println("prompt-improver v1.0.0")
@@ -232,7 +241,7 @@ func runHook() {
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		os.Exit(1) // non-blocking error, prompt proceeds
+		os.Exit(1)
 	}
 
 	var hi hookInput
@@ -258,19 +267,31 @@ func runHook() {
 		cfg = enhancer.LoadConfig(hi.Cwd)
 	}
 
+	// Smart filtering — skip short/conversational/already-structured prompts
+	if !enhancer.ShouldEnhance(hi.Prompt, cfg) {
+		os.Exit(0)
+		return
+	}
+
+	// Score gate — skip enhancement if the prompt already scores well
+	threshold := cfg.Hook.SkipScoreThreshold
+	if threshold <= 0 {
+		threshold = 75
+	}
+	analysis := enhancer.Analyze(hi.Prompt)
+	if analysis.ScoreReport != nil && analysis.ScoreReport.Overall >= threshold {
+		os.Exit(0)
+		return
+	}
+
 	// Enhance the prompt with config
 	result := enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
 
-	// Build additional context with the enhanced version
+	// Lean output — XML-wrapped enhanced prompt with a short directive
 	var context strings.Builder
-	context.WriteString("## Prompt Enhancement Applied\n\n")
-	context.WriteString("The following enhanced version of the prompt incorporates best practices:\n\n")
+	context.WriteString("<enhanced_prompt>\n")
 	context.WriteString(result.Enhanced)
-	context.WriteString("\n\n### Improvements Made\n")
-	for _, imp := range result.Improvements {
-		fmt.Fprintf(&context, "- %s\n", imp)
-	}
-	fmt.Fprintf(&context, "\nDetected task type: %s\n", result.TaskType)
+	context.WriteString("\n</enhanced_prompt>\nFollow the enhanced version above. It adds structure and specificity to the original request.")
 
 	// Output structured JSON per Claude Code hook spec
 	out := hookOutput{
@@ -321,8 +342,16 @@ USAGE:
   prompt-improver check-claudemd [path]         CLAUDE.md health check (default: ./CLAUDE.md)
   prompt-improver template <name> [--var val]   Fill a prompt template
   prompt-improver templates                     List available templates
+  prompt-improver mcp                           MCP stdio server (3 tools)
   prompt-improver hook                          Claude Code hook mode (JSON stdin)
+  prompt-improver install [--global] [flags]    Install hook and/or MCP into Claude Code settings
+  prompt-improver uninstall [--global]          Remove prompt-improver from Claude Code settings
   echo "prompt" | prompt-improver               Pipe mode
+
+INSTALL FLAGS:
+  --global      Write to ~/.claude/settings.json (default: .claude/settings.json)
+  --hook-only   Only install the UserPromptSubmit hook
+  --mcp-only    Only install the MCP server
 
 PIPELINE (13 stages):
   0  config_rules         Pattern-matched augmentations
@@ -348,26 +377,29 @@ LINT CHECKS:
   thinking-mode-redundant, example-quality, compaction-readiness
 
 CLAUDE CODE HOOK INTEGRATION:
-  Add to .claude/settings.json (project) or ~/.claude/settings.json (global):
+  Quick setup (recommended):
+    prompt-improver install --global       # hook + MCP for all projects
+    prompt-improver install                # hook + MCP for current project only
+    prompt-improver install --hook-only    # just the hook
+    prompt-improver uninstall --global     # remove everything
 
-    {
-      "hooks": {
-        "UserPromptSubmit": [
-          {
-            "hooks": [
-              {
-                "type": "command",
-                "command": "prompt-improver hook",
-                "timeout": 10
-              }
-            ]
-          }
-        ]
-      }
-    }
+  The hook automatically filters short/conversational prompts ("yes", "ok", "continue"),
+  skips already-well-structured prompts, and only enhances prompts that score below 75.
+  Configure thresholds in .prompt-improver.yaml:
 
-  The hook reads the UserPromptSubmit JSON from stdin, enhances the prompt,
-  and returns additionalContext that Claude sees alongside the original prompt.
+    hook:
+      skip_score_threshold: 75   # skip if score >= this (0 = always enhance)
+      min_word_count: 5          # skip prompts shorter than this
+
   Exit code 0 = proceed, exit code 2 = block the prompt.
+
+MCP SERVER (on-demand tools for Claude Code):
+  Add to project .mcp.json:
+    { "mcpServers": { "prompt-improver": { "type": "stdio", "command": "prompt-improver", "args": ["mcp"] } } }
+
+  Or register globally:
+    claude mcp add --transport stdio prompt-improver --scope user -- prompt-improver mcp
+
+  Tools exposed: analyze_prompt, enhance_prompt, lint_prompt
 `)
 }

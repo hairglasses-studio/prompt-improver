@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var binaryPath string
@@ -242,7 +244,8 @@ func TestCLI_CheckClaudeMD_Bad(t *testing.T) {
 }
 
 func TestCLI_Hook_ValidJSON(t *testing.T) {
-	hookJSON := `{"session_id":"test","prompt":"fix this bug in sorting","hook_event_name":"UserPromptSubmit"}`
+	// Use a prompt long enough to pass the word count filter and low-scoring enough to pass the score gate
+	hookJSON := `{"session_id":"test","prompt":"fix this bug in the sorting function that crashes on empty input","hook_event_name":"UserPromptSubmit"}`
 	cmd := exec.Command(binaryPath, "hook")
 	cmd.Stdin = strings.NewReader(hookJSON)
 	var outBuf strings.Builder
@@ -252,8 +255,8 @@ func TestCLI_Hook_ValidJSON(t *testing.T) {
 	if !strings.Contains(outBuf.String(), "hookSpecificOutput") {
 		t.Error("hook with valid JSON should return hookSpecificOutput")
 	}
-	if !strings.Contains(outBuf.String(), "UserPromptSubmit") {
-		t.Error("hook should return UserPromptSubmit event name")
+	if !strings.Contains(outBuf.String(), "enhanced_prompt") {
+		t.Error("hook should return enhanced_prompt XML tags")
 	}
 }
 
@@ -272,6 +275,36 @@ func TestCLI_Hook_EmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestCLI_Hook_FilteredShortPrompt(t *testing.T) {
+	// "yes" should be filtered out — no output, clean exit
+	hookJSON := `{"session_id":"test","prompt":"yes","hook_event_name":"UserPromptSubmit"}`
+	cmd := exec.Command(binaryPath, "hook")
+	cmd.Stdin = strings.NewReader(hookJSON)
+	var outBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Run()
+	output := outBuf.String()
+	if strings.Contains(output, "hookSpecificOutput") {
+		t.Error("short conversational prompt 'yes' should be filtered out")
+	}
+}
+
+func TestCLI_Hook_FilteredConversational(t *testing.T) {
+	for _, prompt := range []string{"ok", "continue", "lgtm", "ship it"} {
+		t.Run(prompt, func(t *testing.T) {
+			hookJSON := fmt.Sprintf(`{"session_id":"test","prompt":"%s","hook_event_name":"UserPromptSubmit"}`, prompt)
+			cmd := exec.Command(binaryPath, "hook")
+			cmd.Stdin = strings.NewReader(hookJSON)
+			var outBuf strings.Builder
+			cmd.Stdout = &outBuf
+			cmd.Run()
+			if strings.Contains(outBuf.String(), "hookSpecificOutput") {
+				t.Errorf("conversational prompt %q should be filtered out", prompt)
+			}
+		})
+	}
+}
+
 func TestCLI_Hook_RawText(t *testing.T) {
 	// Non-JSON input falls back to raw text enhancement
 	cmd := exec.Command(binaryPath, "hook")
@@ -282,6 +315,50 @@ func TestCLI_Hook_RawText(t *testing.T) {
 	// Should produce the enhanced prompt as plain text
 	if outBuf.String() == "" {
 		t.Error("hook with raw text should produce output")
+	}
+}
+
+func TestCLI_MCP_Initialize(t *testing.T) {
+	// Send JSON-RPC initialize, initialized notification, then tools/list over stdin.
+	// Use a pipe with delayed close so the server has time to process and respond.
+	initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}` + "\n"
+	initializedNotif := `{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}` + "\n"
+	toolsReq := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}` + "\n"
+
+	cmd := exec.Command(binaryPath, "mcp")
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("failed to create stdin pipe: %v", err)
+	}
+	var outBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start MCP server: %v", err)
+	}
+
+	// Write requests
+	fmt.Fprint(stdinPipe, initReq)
+	fmt.Fprint(stdinPipe, initializedNotif)
+	fmt.Fprint(stdinPipe, toolsReq)
+
+	// Give the server time to process before closing stdin
+	time.Sleep(500 * time.Millisecond)
+	stdinPipe.Close()
+
+	// Wait for process to exit (EOF causes exit)
+	cmd.Wait()
+
+	output := outBuf.String()
+	if !strings.Contains(output, "analyze_prompt") {
+		t.Errorf("MCP tools/list should include analyze_prompt, got: %s", output)
+	}
+	if !strings.Contains(output, "enhance_prompt") {
+		t.Errorf("MCP tools/list should include enhance_prompt, got: %s", output)
+	}
+	if !strings.Contains(output, "lint_prompt") {
+		t.Errorf("MCP tools/list should include lint_prompt, got: %s", output)
 	}
 }
 
