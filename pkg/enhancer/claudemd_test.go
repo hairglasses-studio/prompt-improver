@@ -1,88 +1,46 @@
 package enhancer
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func writeTempFile(t *testing.T, content string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "CLAUDE.md")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func TestCheckClaudeMD_ExcessiveLength(t *testing.T) {
 	content := strings.Repeat("line\n", 250)
-	path := writeTempFile(t, content)
+	path := writeTempCLAUDEMD(t, content)
 
 	results, err := CheckClaudeMD(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	found := false
-	for _, r := range results {
-		if r.Category == "excessive-length" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("Should flag CLAUDE.md with >200 lines")
-	}
+	assertClaudeMDCategory(t, results, "excessive-length")
 }
 
 func TestCheckClaudeMD_OvertriggerLanguage(t *testing.T) {
 	content := "# Rules\n\nCRITICAL: You MUST always follow the coding standards.\nIMPORTANT: You SHOULD never skip tests."
-	path := writeTempFile(t, content)
+	path := writeTempCLAUDEMD(t, content)
 
 	results, err := CheckClaudeMD(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	found := false
-	for _, r := range results {
-		if r.Category == "overtrigger-language" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("Should flag overtrigger language in CLAUDE.md")
-	}
+	assertClaudeMDCategory(t, results, "overtrigger-language")
 }
 
 func TestCheckClaudeMD_InlineCode(t *testing.T) {
 	content := "# Code\n\n```go\nfunc a() {}\n```\n\n```go\nfunc b() {}\n```\n\n```go\nfunc c() {}\n```\n\n```go\nfunc d() {}\n```\n"
-	path := writeTempFile(t, content)
+	path := writeTempCLAUDEMD(t, content)
 
 	results, err := CheckClaudeMD(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	found := false
-	for _, r := range results {
-		if r.Category == "inline-code" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("Should flag excessive inline code blocks")
-	}
+	assertClaudeMDCategory(t, results, "inline-code")
 }
 
 func TestCheckClaudeMD_Healthy(t *testing.T) {
 	content := "# Project\n\nThis is a simple Go project.\n\n## Standards\n\nUse gofmt."
-	path := writeTempFile(t, content)
+	path := writeTempCLAUDEMD(t, content)
 
 	results, err := CheckClaudeMD(path)
 	if err != nil {
@@ -99,4 +57,49 @@ func TestCheckClaudeMD_MissingFile(t *testing.T) {
 	if err == nil {
 		t.Error("Should return error for missing file")
 	}
+}
+
+func TestCheckClaudeMD_AggressiveCaps(t *testing.T) {
+	content := "CRITICAL rule one.\nIMPORTANT rule two.\nMUST do three.\nALWAYS do four.\nNEVER skip five."
+	path := writeTempCLAUDEMD(t, content)
+
+	results, err := CheckClaudeMD(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertClaudeMDCategory(t, results, "aggressive-caps")
+}
+
+func TestCheckClaudeMD_StyleGuide(t *testing.T) {
+	content := "# Style\n\nIndent with tabs.\nUse snake_case naming convention.\nSort imports alphabetically.\nLine length should be 120."
+	path := writeTempCLAUDEMD(t, content)
+
+	results, err := CheckClaudeMD(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertClaudeMDCategory(t, results, "style-guide-content")
+}
+
+func TestCheckClaudeMD_MissingHeaders(t *testing.T) {
+	// More than 20 lines, no headers
+	content := strings.Repeat("This is a line without any headers.\n", 25)
+	path := writeTempCLAUDEMD(t, content)
+
+	results, err := CheckClaudeMD(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertClaudeMDCategory(t, results, "missing-headers")
+}
+
+// assertClaudeMDCategory checks that at least one ClaudeMDResult has the given category.
+func assertClaudeMDCategory(t *testing.T, results []ClaudeMDResult, category string) {
+	t.Helper()
+	for _, r := range results {
+		if r.Category == category {
+			return
+		}
+	}
+	t.Errorf("expected ClaudeMD category %q, not found in %d results", category, len(results))
 }
