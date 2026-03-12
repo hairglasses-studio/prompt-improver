@@ -113,6 +113,12 @@ func TestCLI_Analyze(t *testing.T) {
 	if !strings.Contains(stdout, `"suggestions"`) {
 		t.Error("analyze output should contain suggestions")
 	}
+	if !strings.Contains(stdout, `"score_report"`) {
+		t.Error("analyze output should contain score_report")
+	}
+	if !strings.Contains(stdout, `"dimensions"`) {
+		t.Error("analyze output should contain dimensions")
+	}
 }
 
 func TestCLI_Lint_Clean(t *testing.T) {

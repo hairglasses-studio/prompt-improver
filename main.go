@@ -315,7 +315,7 @@ func printHelp() {
 USAGE:
   prompt-improver <prompt>                      Enhance a prompt (default)
   prompt-improver enhance <prompt> [--type T]   Enhance with explicit task type
-  prompt-improver analyze <prompt>              Score, suggest, estimate tokens & effort
+  prompt-improver analyze <prompt>              Multi-dimensional scoring, suggestions, tokens & effort
   prompt-improver lint <prompt>                 Deep lint with per-line findings
   prompt-improver cache-check <file>            Check prompt caching friendliness
   prompt-improver check-claudemd [path]         CLAUDE.md health check (default: ./CLAUDE.md)
