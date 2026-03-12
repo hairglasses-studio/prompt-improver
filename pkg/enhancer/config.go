@@ -25,6 +25,9 @@ type Config struct {
 
 	// DefaultTaskType overrides auto-detection
 	DefaultTaskType string `yaml:"default_task_type"`
+
+	// DefaultEffort overrides auto-detection of effort level (low, medium, high)
+	DefaultEffort string `yaml:"default_effort"`
 }
 
 // Rule is a pattern-matched augmentation rule

@@ -123,6 +123,94 @@ func InjectQuoteGrounding(text string, taskType TaskType) (string, []string) {
 	return text + grounding, []string{fmt.Sprintf("Injected quote-grounding instruction for long-context prompt (~%d tokens)", tokens)}
 }
 
+// VerifyCacheFriendlyOrder checks whether a prompt's structure is optimized for
+// Anthropic's prompt caching (90% cost reduction, 85% latency reduction).
+// Caching requires exact prefix matching — static content MUST precede dynamic content.
+func VerifyCacheFriendlyOrder(text string) []LintResult {
+	var results []LintResult
+
+	// Identify static section positions (role, constraints, examples, output_format)
+	staticTags := []string{"<role>", "<constraints>", "<examples>", "<output_format>"}
+	// Identify dynamic section positions (instructions with {{...}}, context with runtime data)
+	dynamicTags := []string{"<instructions>", "<context>"}
+
+	firstStaticPos := -1
+	lastDynamicPos := -1
+
+	lower := strings.ToLower(text)
+
+	for _, tag := range staticTags {
+		if idx := strings.Index(lower, tag); idx != -1 {
+			if firstStaticPos == -1 || idx < firstStaticPos {
+				firstStaticPos = idx
+			}
+		}
+	}
+
+	for _, tag := range dynamicTags {
+		if idx := strings.Index(lower, tag); idx != -1 {
+			// Check if this section contains template variables (dynamic)
+			endTag := strings.Replace(tag, "<", "</", 1)
+			endIdx := strings.Index(lower[idx:], endTag)
+			section := ""
+			if endIdx != -1 {
+				section = text[idx : idx+endIdx]
+			} else {
+				section = text[idx:]
+			}
+
+			hasDynamic := strings.Contains(section, "{{") || strings.Contains(section, "${")
+			if hasDynamic && idx > lastDynamicPos {
+				lastDynamicPos = idx
+			}
+		}
+	}
+
+	// Check if any dynamic section appears before a static section
+	if lastDynamicPos != -1 && firstStaticPos != -1 && lastDynamicPos < firstStaticPos {
+		lineNum := strings.Count(text[:lastDynamicPos], "\n") + 1
+		results = append(results, LintResult{
+			Line:        lineNum,
+			Category:    "cache-unfriendly-order",
+			Severity:    "warn",
+			Original:    "(dynamic section before static section)",
+			Suggestion:  "Move static sections (<role>, <constraints>, <examples>, <output_format>) BEFORE dynamic sections (<instructions>, <context>) for prompt caching. Caching requires exact prefix matching — static content first gives 90% cost reduction.",
+			AutoFixable: false,
+		})
+	}
+
+	// Check for template variables in early sections
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if (strings.Contains(line, "{{") || strings.Contains(line, "${")) && i < len(lines)/3 {
+			// Dynamic content in first third of prompt — bad for caching
+			results = append(results, LintResult{
+				Line:        i + 1,
+				Category:    "cache-unfriendly-variable",
+				Severity:    "info",
+				Original:    strings.TrimSpace(line),
+				Suggestion:  "Template variable in the first third of the prompt breaks cache prefix matching. Move dynamic/variable content toward the end of the prompt.",
+				AutoFixable: false,
+			})
+			break // only report once
+		}
+	}
+
+	// Check for missing structure altogether (hard to cache unstructured prompts)
+	if !strings.Contains(lower, "<") && EstimateTokens(text) > 1000 {
+		results = append(results, LintResult{
+			Line:        0,
+			Category:    "cache-no-structure",
+			Severity:    "info",
+			Original:    "(no XML structure detected)",
+			Suggestion:  "Prompt has no XML structure. Adding XML tags enables prompt caching — place stable content (<role>, <constraints>) at the top as a cacheable prefix.",
+			AutoFixable: false,
+		})
+	}
+
+	return results
+}
+
 // splitParagraphs splits text on double newlines
 func splitParagraphs(text string) []string {
 	raw := strings.Split(text, "\n\n")
