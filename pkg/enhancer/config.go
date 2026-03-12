@@ -28,6 +28,21 @@ type Config struct {
 
 	// DefaultEffort overrides auto-detection of effort level (low, medium, high)
 	DefaultEffort string `yaml:"default_effort"`
+
+	// Hook holds configuration specific to the UserPromptSubmit hook mode
+	Hook HookConfig `yaml:"hook"`
+}
+
+// HookConfig holds settings for the Claude Code UserPromptSubmit hook.
+type HookConfig struct {
+	// SkipScoreThreshold skips enhancement if the prompt already scores >= this (default 75, 0 = always enhance)
+	SkipScoreThreshold int `yaml:"skip_score_threshold"`
+
+	// MinWordCount skips prompts shorter than this (default 5)
+	MinWordCount int `yaml:"min_word_count"`
+
+	// SkipPatterns are additional regex patterns that cause the hook to skip enhancement
+	SkipPatterns []string `yaml:"skip_patterns"`
 }
 
 // Rule is a pattern-matched augmentation rule
