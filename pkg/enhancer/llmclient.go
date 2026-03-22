@@ -42,7 +42,7 @@ func NewLLMClient(cfg LLMConfig) *LLMClient {
 
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = 15 * time.Second
+		timeout = 25 * time.Second
 	}
 
 	return &LLMClient{
