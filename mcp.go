@@ -79,6 +79,12 @@ func handleLint(_ context.Context, _ *mcp.CallToolRequest, args LintArgs) (*mcp.
 	}, nil, nil
 }
 
+// DiffArgs is the input schema for the diff_prompt tool.
+type DiffArgs struct {
+	Prompt   string `json:"prompt" jsonschema:"The prompt text to diff (original vs enhanced)"`
+	TaskType string `json:"task_type,omitempty" jsonschema:"Task type override: code, creative, analysis, troubleshooting, workflow, or general"`
+}
+
 // ImproveArgs is the input schema for the improve_prompt tool.
 type ImproveArgs struct {
 	Prompt          string `json:"prompt" jsonschema:"The prompt text to improve using LLM"`
@@ -86,6 +92,36 @@ type ImproveArgs struct {
 	ThinkingEnabled bool   `json:"thinking_enabled,omitempty" jsonschema:"Add thinking scaffolding to the improved prompt"`
 	Feedback        string `json:"feedback,omitempty" jsonschema:"Optional targeted improvement hints"`
 	Mode            string `json:"mode,omitempty" jsonschema:"Enhancement mode: local, llm, or auto (default: auto)"`
+}
+
+func handleDiff(_ context.Context, _ *mcp.CallToolRequest, args DiffArgs) (*mcp.CallToolResult, any, error) {
+	if args.Prompt == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: prompt is required"}},
+			IsError: true,
+		}, nil, nil
+	}
+	tt := enhancer.ValidTaskType(args.TaskType)
+	result := enhancer.Enhance(args.Prompt, tt)
+
+	var sb strings.Builder
+	sb.WriteString("--- original\n+++ enhanced\n\n")
+	for _, line := range strings.Split(args.Prompt, "\n") {
+		fmt.Fprintf(&sb, "- %s\n", line)
+	}
+	sb.WriteString("\n")
+	for _, line := range strings.Split(result.Enhanced, "\n") {
+		fmt.Fprintf(&sb, "+ %s\n", line)
+	}
+	if len(result.Improvements) > 0 {
+		fmt.Fprintf(&sb, "\n%d improvements:\n", len(result.Improvements))
+		for _, imp := range result.Improvements {
+			fmt.Fprintf(&sb, "  • %s\n", imp)
+		}
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: sb.String()}},
+	}, nil, nil
 }
 
 func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs) (*mcp.CallToolResult, any, error) {
@@ -102,7 +138,7 @@ func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs
 		mode = enhancer.ModeAuto
 	}
 
-	cfg := enhancer.LoadConfig(".")
+	cfg := enhancer.ResolveConfig(".")
 	cfg.LLM.Enabled = true
 	if args.ThinkingEnabled {
 		cfg.LLM.ThinkingEnabled = true
@@ -143,6 +179,11 @@ func runMCP() {
 		Name:        "lint_prompt",
 		Description: "Deep lint a prompt for 11 anti-patterns: overtrigger phrases, negative framing, aggressive emphasis, vague quantifiers, unmotivated rules, over-specification, injection risk, thinking-mode redundancy, example quality, compaction readiness, and cache-friendly ordering.",
 	}, handleLint)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "diff_prompt",
+		Description: "Show a unified diff of original vs enhanced prompt. Displays added/removed lines and lists improvements applied by the 13-stage pipeline.",
+	}, handleDiff)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "improve_prompt",
