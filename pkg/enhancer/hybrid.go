@@ -112,7 +112,7 @@ func EnhanceHybrid(ctx context.Context, prompt string, taskType TaskType, cfg Co
 	// Call LLM
 	timeout := engine.Cfg.Timeout
 	if timeout <= 0 {
-		timeout = 25 * time.Second
+		timeout = 30 * time.Second
 	}
 	llmCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

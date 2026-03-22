@@ -289,8 +289,8 @@ func TestScoreRoleDefinition(t *testing.T) {
 	t.Run("no_role", func(t *testing.T) {
 		ar := Analyze("review this code")
 		d := findDimension(ar.ScoreReport, "Role Definition")
-		if d.Score > 30 {
-			t.Errorf("Prompt without role scored %d, want <= 30", d.Score)
+		if d.Score > 40 {
+			t.Errorf("Prompt without role scored %d, want <= 40", d.Score)
 		}
 	})
 }

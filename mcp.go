@@ -124,6 +124,45 @@ func handleDiff(_ context.Context, _ *mcp.CallToolRequest, args DiffArgs) (*mcp.
 	}, nil, nil
 }
 
+// CheckClaudeMDArgs is the input schema for the check_claudemd tool.
+type CheckClaudeMDArgs struct {
+	Path string `json:"path" jsonschema:"Path to the CLAUDE.md file to check"`
+}
+
+// ListTemplatesArgs is the input schema for the list_templates tool (no params).
+type ListTemplatesArgs struct{}
+
+func handleCheckClaudeMD(_ context.Context, _ *mcp.CallToolRequest, args CheckClaudeMDArgs) (*mcp.CallToolResult, any, error) {
+	path := args.Path
+	if path == "" {
+		path = "./CLAUDE.md"
+	}
+	results, err := enhancer.CheckClaudeMD(path)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: " + err.Error()}},
+			IsError: true,
+		}, nil, nil
+	}
+	if len(results) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "CLAUDE.md looks healthy — no issues found."}},
+		}, nil, nil
+	}
+	data, _ := json.MarshalIndent(results, "", "  ")
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+func handleListTemplates(_ context.Context, _ *mcp.CallToolRequest, _ ListTemplatesArgs) (*mcp.CallToolResult, any, error) {
+	templates := enhancer.ListTemplates()
+	data, _ := json.MarshalIndent(templates, "", "  ")
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
 func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs) (*mcp.CallToolResult, any, error) {
 	if args.Prompt == "" {
 		return &mcp.CallToolResult{
@@ -160,8 +199,16 @@ func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs
 }
 
 func runMCP() {
+	// Eagerly initialize the shared hybrid engine so MCP handlers reuse the
+	// same circuit breaker and cache as the CLI. getOrCreateEngine stores the
+	// engine in the package-level hybridEngine variable.
+	cfg := enhancer.ResolveConfig(".")
+	if cfg.LLM.Enabled {
+		getOrCreateEngine(cfg.LLM)
+	}
+
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "prompt-improver", Version: "2.0.0"},
+		&mcp.Implementation{Name: "prompt-improver", Version: version},
 		nil,
 	)
 
@@ -189,6 +236,16 @@ func runMCP() {
 		Name:        "improve_prompt",
 		Description: "LLM-powered prompt improvement using Claude. Analyzes task type, adds domain-specific role, structured output sections, scratchpad, and template variables. Falls back to local 13-stage pipeline if LLM is unavailable. Set mode=local for deterministic-only enhancement.",
 	}, handleImprove)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "check_claudemd",
+		Description: "Health-check a CLAUDE.md file for common issues: excessive length, inline code blocks, style guide content that belongs in linter config, overtrigger language, aggressive ALL-CAPS, and missing section headers.",
+	}, handleCheckClaudeMD)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_templates",
+		Description: "List all available prompt templates with their names, descriptions, task types, variables, and usage examples.",
+	}, handleListTemplates)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		// EOF is expected when the client disconnects

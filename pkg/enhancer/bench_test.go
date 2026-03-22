@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func BenchmarkEnhance(b *testing.B) {
+	prompt := "Write a Go function that parses JSON input, validates the schema, and returns a typed struct with comprehensive error handling for malformed input"
+	for b.Loop() {
+		Enhance(prompt, TaskTypeCode)
+	}
+}
+
 func BenchmarkEnhance_Short(b *testing.B) {
 	for b.Loop() {
 		Enhance("fix this bug in the user sorting function", TaskTypeCode)

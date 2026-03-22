@@ -1,32 +1,86 @@
-.PHONY: test cover bench lint golden-update ci build
+.PHONY: help build install test test-short cover bench lint vet fmt fmt-check golden-update build-all clean ci
 
-# Run all tests
+BINARY     := prompt-improver
+VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS    := -ldflags "-X main.version=$(VERSION)"
+GOTEST     := go test
+GOFLAGS    := -count=1
+
+.DEFAULT_GOAL := help
+
+## help: Show all available targets
+help:
+	@echo "prompt-improver build targets ($(VERSION)):"
+	@echo ""
+	@sed -n 's/^## //p' $(MAKEFILE_LIST) | column -t -s ':' | sed 's/^/  /'
+
+## build: Build binary with version injection
+build:
+	go build $(LDFLAGS) -o $(BINARY) .
+
+## install: Build, install to /usr/local/bin, codesign (macOS)
+install: build
+	sudo cp $(BINARY) /usr/local/bin/$(BINARY)
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		sudo codesign -f -s - /usr/local/bin/$(BINARY); \
+		echo "Installed and codesigned /usr/local/bin/$(BINARY) $(VERSION)"; \
+	else \
+		echo "Installed /usr/local/bin/$(BINARY) $(VERSION)"; \
+	fi
+
+## test: Run all tests with race detection
 test:
-	go test ./... -v -count=1
+	$(GOTEST) -race -v $(GOFLAGS) ./...
 
-# Run tests with coverage report
+## test-short: Run fast tests only (skip slow integration tests)
+test-short:
+	$(GOTEST) -race -short -v $(GOFLAGS) ./...
+
+## cover: Run tests with coverage report
 cover:
-	go test ./... -coverprofile=coverage.out -count=1
+	$(GOTEST) -race -coverprofile=coverage.out $(GOFLAGS) ./...
 	go tool cover -func=coverage.out
 	@echo ""
 	@echo "To view HTML report: go tool cover -html=coverage.out"
 
-# Run benchmarks
+## bench: Run benchmarks
 bench:
-	go test ./pkg/enhancer/ -bench=. -benchmem -count=3
+	$(GOTEST) ./pkg/enhancer/ -bench=. -benchmem -count=3
 
-# Run go vet
-lint:
+## lint: Run go vet and staticcheck
+lint: vet
+	@command -v staticcheck >/dev/null 2>&1 || { echo "Install staticcheck: go install honnef.co/go/tools/cmd/staticcheck@latest"; exit 1; }
+	staticcheck ./...
+
+## vet: Run go vet
+vet:
 	go vet ./...
 
-# Update golden files
+## fmt: Format all Go files
+fmt:
+	gofmt -w .
+
+## fmt-check: Check formatting (fails if unformatted)
+fmt-check:
+	@test -z "$$(gofmt -l .)" || { echo "Files need formatting:"; gofmt -l .; exit 1; }
+
+## golden-update: Regenerate golden test files
 golden-update:
-	GOLDEN_UPDATE=1 go test ./pkg/enhancer/ -run TestGolden -v
+	GOLDEN_UPDATE=1 $(GOTEST) ./pkg/enhancer/ -run TestGolden -v
 
-# Full CI pipeline
-ci: lint test cover bench
-	@echo "CI passed"
+## build-all: Cross-compile for darwin/amd64, darwin/arm64, linux/amd64
+build-all:
+	@mkdir -p dist
+	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64 .
+	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64 .
+	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64 .
+	@echo "Built $(VERSION) for 3 platforms in dist/"
 
-# Build binary
-build:
-	go build -o prompt-improver .
+## clean: Remove build artifacts
+clean:
+	rm -f $(BINARY) coverage.out
+	rm -rf dist/
+
+## ci: Full CI pipeline (fmt-check, lint, test, cover, bench)
+ci: fmt-check lint test cover bench
+	@echo "CI passed ($(VERSION))"
