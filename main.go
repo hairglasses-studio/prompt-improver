@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/hairglasses-studio/prompt-improver/pkg/enhancer"
 )
@@ -366,10 +367,12 @@ func runHook() {
 		return
 	}
 
-	// Load project-specific config if cwd is set
+	// Load config with global fallback + env var overrides
 	cfg := enhancer.Config{}
 	if hi.Cwd != "" {
-		cfg = enhancer.LoadConfig(hi.Cwd)
+		cfg = enhancer.ResolveConfig(hi.Cwd)
+	} else {
+		cfg = enhancer.ResolveConfig("")
 	}
 
 	// Smart filtering — skip short/conversational/already-structured prompts
@@ -379,9 +382,14 @@ func runHook() {
 	}
 
 	// Score gate — skip enhancement if the prompt already scores well
+	// LLM mode uses a lower default threshold since it adds more value
 	threshold := cfg.Hook.SkipScoreThreshold
 	if threshold <= 0 {
-		threshold = 75
+		if cfg.LLM.Enabled {
+			threshold = 50
+		} else {
+			threshold = 75
+		}
 	}
 	analysis := enhancer.Analyze(hi.Prompt)
 	if analysis.ScoreReport != nil && analysis.ScoreReport.Overall >= threshold {
@@ -392,8 +400,11 @@ func runHook() {
 	// Enhance — use LLM if configured, otherwise local pipeline
 	var result enhancer.EnhanceResult
 	if cfg.LLM.Enabled {
+		fmt.Fprintf(os.Stderr, "prompt-improver: enhancing via LLM...\n")
+		start := time.Now()
 		engine := getOrCreateEngine(cfg.LLM)
 		result = enhancer.EnhanceHybrid(context.Background(), hi.Prompt, "", cfg, engine, enhancer.ModeAuto)
+		fmt.Fprintf(os.Stderr, "prompt-improver: enhanced via %s (%.1fs)\n", result.Source, time.Since(start).Seconds())
 	} else {
 		result = enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
 		result.Source = "local"

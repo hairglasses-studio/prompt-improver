@@ -103,6 +103,62 @@ func LoadConfig(dir string) Config {
 	return cfg
 }
 
+// configFound returns true if the config has any non-zero fields,
+// distinguishing "found a config file" from "no config file at all".
+func configFound(cfg Config) bool {
+	return cfg.Preamble != "" ||
+		len(cfg.Rules) > 0 ||
+		len(cfg.BlockPatterns) > 0 ||
+		len(cfg.DisabledStages) > 0 ||
+		cfg.DefaultTaskType != "" ||
+		cfg.DefaultEffort != "" ||
+		cfg.Hook.SkipScoreThreshold != 0 ||
+		cfg.Hook.MinWordCount != 0 ||
+		len(cfg.Hook.SkipPatterns) > 0 ||
+		cfg.LLM.Enabled ||
+		cfg.LLM.Model != "" ||
+		cfg.LLM.BaseURL != "" ||
+		cfg.LLM.Timeout != 0 ||
+		cfg.LLM.APIKeyEnv != "" ||
+		cfg.LLM.ThinkingEnabled
+}
+
+// LoadConfigWithFallback loads config from the project directory first,
+// then falls back to the user's home directory if no project config exists.
+func LoadConfigWithFallback(projectDir string) Config {
+	cfg := LoadConfig(projectDir)
+	if configFound(cfg) {
+		return cfg
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return cfg
+	}
+	return LoadConfig(home)
+}
+
+// ResolveConfig loads config with fallback and applies environment variable overrides.
+// PROMPT_IMPROVER_LLM=1 enables LLM mode; PROMPT_IMPROVER_LLM=0 disables it.
+// PROMPT_IMPROVER_MODEL overrides the LLM model.
+func ResolveConfig(projectDir string) Config {
+	cfg := LoadConfigWithFallback(projectDir)
+
+	if v := os.Getenv("PROMPT_IMPROVER_LLM"); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes":
+			cfg.LLM.Enabled = true
+		case "0", "false", "no":
+			cfg.LLM.Enabled = false
+		}
+	}
+
+	if m := os.Getenv("PROMPT_IMPROVER_MODEL"); m != "" {
+		cfg.LLM.Model = m
+	}
+
+	return cfg
+}
+
 // IsStageDisabled checks if a pipeline stage is disabled in config
 func (c Config) IsStageDisabled(stage string) bool {
 	for _, s := range c.DisabledStages {
