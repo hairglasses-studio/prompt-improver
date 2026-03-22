@@ -29,6 +29,7 @@ type EnhanceResult struct {
 	Improvements    []string `json:"improvements"`
 	EstimatedTokens int      `json:"estimated_tokens"`
 	CostTier        string   `json:"cost_tier"`
+	Source          string   `json:"source,omitempty"` // "local", "llm", "llm_cached", "local_fallback", "error"
 }
 
 // AnalyzeResult holds prompt quality analysis
