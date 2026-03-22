@@ -207,7 +207,7 @@ func addHookEntry(s *settingsJSON, exe string) {
 			{
 				Type:    "command",
 				Command: cmd,
-				Timeout: 10,
+				Timeout: 30, // 30s allows LLM-backed improvement (~3-5s typical)
 			},
 		},
 	}

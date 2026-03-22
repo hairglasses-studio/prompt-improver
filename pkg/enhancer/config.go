@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -31,6 +32,30 @@ type Config struct {
 
 	// Hook holds configuration specific to the UserPromptSubmit hook mode
 	Hook HookConfig `yaml:"hook"`
+
+	// LLM holds configuration for LLM-backed prompt improvement
+	LLM LLMConfig `yaml:"llm"`
+}
+
+// LLMConfig holds settings for the LLM-backed enhancement mode.
+type LLMConfig struct {
+	// Enabled activates LLM-backed improvement (default false — opt-in)
+	Enabled bool `yaml:"enabled"`
+
+	// ThinkingEnabled adds thinking scaffolding to the meta-prompt
+	ThinkingEnabled bool `yaml:"thinking_enabled"`
+
+	// Model is the Claude model to use (default "claude-sonnet-4-6")
+	Model string `yaml:"model"`
+
+	// BaseURL is the API base URL (default "https://api.anthropic.com")
+	BaseURL string `yaml:"base_url"`
+
+	// Timeout is the API call timeout (default 15s)
+	Timeout time.Duration `yaml:"timeout"`
+
+	// APIKeyEnv is the environment variable holding the API key (default "ANTHROPIC_API_KEY")
+	APIKeyEnv string `yaml:"api_key_env"`
 }
 
 // HookConfig holds settings for the Claude Code UserPromptSubmit hook.

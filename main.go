@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,9 @@ import (
 
 	"github.com/hairglasses-studio/prompt-improver/pkg/enhancer"
 )
+
+// hybridEngine is initialized once when LLM mode is needed.
+var hybridEngine *enhancer.HybridEngine
 
 func main() {
 	args := os.Args[1:]
@@ -46,10 +50,14 @@ func main() {
 	switch args[0] {
 	case "enhance":
 		taskType := ""
+		mode := ""
 		prompt := ""
 		for i := 1; i < len(args); i++ {
 			if args[i] == "--type" && i+1 < len(args) {
 				taskType = args[i+1]
+				i++
+			} else if args[i] == "--mode" && i+1 < len(args) {
+				mode = args[i+1]
 				i++
 			} else if prompt == "" {
 				prompt = args[i]
@@ -61,10 +69,50 @@ func main() {
 			prompt = readStdin()
 		}
 		if prompt == "" {
-			fmt.Fprintln(os.Stderr, "usage: prompt-improver enhance <prompt> [--type code|creative|analysis|troubleshooting|workflow|general]")
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver enhance <prompt> [--type T] [--mode local|llm|auto]")
 			os.Exit(1)
 		}
-		runEnhance(prompt, taskType)
+		if mode != "" {
+			runEnhanceWithMode(prompt, taskType, mode)
+		} else {
+			runEnhance(prompt, taskType)
+		}
+
+	case "improve":
+		taskType := ""
+		thinking := false
+		feedback := ""
+		prompt := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--type":
+				if i+1 < len(args) {
+					taskType = args[i+1]
+					i++
+				}
+			case "--thinking":
+				thinking = true
+			case "--feedback":
+				if i+1 < len(args) {
+					feedback = args[i+1]
+					i++
+				}
+			default:
+				if prompt == "" {
+					prompt = args[i]
+				} else {
+					prompt += " " + args[i]
+				}
+			}
+		}
+		if prompt == "" {
+			prompt = readStdin()
+		}
+		if prompt == "" {
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver improve <prompt> [--thinking] [--feedback hint] [--type T]")
+			os.Exit(1)
+		}
+		runImprove(prompt, taskType, thinking, feedback)
 
 	case "analyze":
 		prompt := strings.Join(args[1:], " ")
@@ -126,7 +174,7 @@ func main() {
 		runUninstall(args[1:])
 
 	case "version":
-		fmt.Println("prompt-improver v1.0.0")
+		fmt.Println("prompt-improver v2.0.0")
 
 	case "help", "--help", "-h":
 		printHelp()
@@ -141,9 +189,66 @@ func main() {
 func runEnhance(prompt, taskType string) {
 	tt := enhancer.ValidTaskType(taskType)
 	result := enhancer.Enhance(prompt, tt)
+	result.Source = "local"
 
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
+}
+
+func runEnhanceWithMode(prompt, taskType, mode string) {
+	tt := enhancer.ValidTaskType(taskType)
+	m := enhancer.ValidMode(mode)
+	if m == "" {
+		fmt.Fprintf(os.Stderr, "invalid mode: %s (use local, llm, or auto)\n", mode)
+		os.Exit(1)
+	}
+
+	cfg := enhancer.LoadConfig(".")
+	cfg.LLM.Enabled = true // --mode flag implies LLM should be available
+	engine := getOrCreateEngine(cfg.LLM)
+
+	result := enhancer.EnhanceHybrid(context.Background(), prompt, tt, cfg, engine, m)
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(data))
+}
+
+func runImprove(prompt, taskType string, thinking bool, feedback string) {
+	tt := enhancer.ValidTaskType(taskType)
+
+	cfg := enhancer.LoadConfig(".")
+	cfg.LLM.Enabled = true
+	if thinking {
+		cfg.LLM.ThinkingEnabled = true
+	}
+	engine := getOrCreateEngine(cfg.LLM)
+	if engine == nil {
+		fmt.Fprintln(os.Stderr, "error: ANTHROPIC_API_KEY not set — cannot use LLM improvement")
+		os.Exit(1)
+	}
+
+	opts := enhancer.ImproveOptions{
+		ThinkingEnabled: thinking,
+		TaskType:        tt,
+		Feedback:        feedback,
+	}
+
+	result, err := engine.Client.Improve(context.Background(), prompt, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(data))
+}
+
+func getOrCreateEngine(cfg enhancer.LLMConfig) *enhancer.HybridEngine {
+	if hybridEngine != nil {
+		return hybridEngine
+	}
+	hybridEngine = enhancer.NewHybridEngine(cfg)
+	return hybridEngine
 }
 
 func runAnalyze(prompt string) {
@@ -284,20 +389,27 @@ func runHook() {
 		return
 	}
 
-	// Enhance the prompt with config
-	result := enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
+	// Enhance — use LLM if configured, otherwise local pipeline
+	var result enhancer.EnhanceResult
+	if cfg.LLM.Enabled {
+		engine := getOrCreateEngine(cfg.LLM)
+		result = enhancer.EnhanceHybrid(context.Background(), hi.Prompt, "", cfg, engine, enhancer.ModeAuto)
+	} else {
+		result = enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
+		result.Source = "local"
+	}
 
 	// Lean output — XML-wrapped enhanced prompt with a short directive
-	var context strings.Builder
-	context.WriteString("<enhanced_prompt>\n")
-	context.WriteString(result.Enhanced)
-	context.WriteString("\n</enhanced_prompt>\nFollow the enhanced version above. It adds structure and specificity to the original request.")
+	var ctxBuilder strings.Builder
+	ctxBuilder.WriteString("<enhanced_prompt>\n")
+	ctxBuilder.WriteString(result.Enhanced)
+	ctxBuilder.WriteString("\n</enhanced_prompt>\nFollow the enhanced version above. It adds structure and specificity to the original request.")
 
 	// Output structured JSON per Claude Code hook spec
 	out := hookOutput{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
-			AdditionalContext: context.String(),
+			AdditionalContext: ctxBuilder.String(),
 		},
 	}
 
@@ -331,18 +443,19 @@ func parseFlags(args []string) map[string]string {
 }
 
 func printHelp() {
-	fmt.Print(`prompt-improver v1.0.0 — Claude-specific prompt optimization CLI
+	fmt.Print(`prompt-improver v2.0.0 — Claude-specific prompt optimization CLI
 
 USAGE:
-  prompt-improver <prompt>                      Enhance a prompt (default)
-  prompt-improver enhance <prompt> [--type T]   Enhance with explicit task type
+  prompt-improver <prompt>                      Enhance a prompt (default, local pipeline)
+  prompt-improver enhance <prompt> [--type T] [--mode M]   Enhance with optional LLM mode
+  prompt-improver improve <prompt> [--thinking] [--feedback hint]   LLM-powered improvement
   prompt-improver analyze <prompt>              Multi-dimensional scoring, suggestions, tokens & effort
   prompt-improver lint <prompt>                 Deep lint with per-line findings
   prompt-improver cache-check <file>            Check prompt caching friendliness
   prompt-improver check-claudemd [path]         CLAUDE.md health check (default: ./CLAUDE.md)
   prompt-improver template <name> [--var val]   Fill a prompt template
   prompt-improver templates                     List available templates
-  prompt-improver mcp                           MCP stdio server (3 tools)
+  prompt-improver mcp                           MCP stdio server (4 tools)
   prompt-improver hook                          Claude Code hook mode (JSON stdin)
   prompt-improver install [--global] [flags]    Install hook and/or MCP into Claude Code settings
   prompt-improver uninstall [--global]          Remove prompt-improver from Claude Code settings
@@ -400,6 +513,33 @@ MCP SERVER (on-demand tools for Claude Code):
   Or register globally:
     claude mcp add --transport stdio prompt-improver --scope user -- prompt-improver mcp
 
-  Tools exposed: analyze_prompt, enhance_prompt, lint_prompt
+  Tools exposed: analyze_prompt, enhance_prompt, lint_prompt, improve_prompt
+
+LLM-POWERED IMPROVEMENT (v2.0.0):
+  prompt-improver improve "fix this bug"           # direct LLM improvement
+  prompt-improver improve "fix this" --thinking    # with thinking scaffolding
+  prompt-improver enhance "fix this" --mode auto   # try LLM, fall back to local
+  prompt-improver enhance "fix this" --mode llm    # LLM only (fail if unavailable)
+  prompt-improver enhance "fix this" --mode local  # deterministic pipeline only
+
+  Requires ANTHROPIC_API_KEY environment variable.
+  Configure in .prompt-improver.yaml:
+
+    llm:
+      enabled: true             # enable LLM in hook mode (default: false)
+      thinking_enabled: true    # add thinking scaffolding
+      model: claude-sonnet-4-6  # model for meta-prompting
+      timeout: 15s              # API call timeout
+      api_key_env: ANTHROPIC_API_KEY
+
+  The LLM mode sends your prompt to Claude with a meta-prompt that adds:
+  - Domain-specific role definition
+  - Template variables for external data
+  - Structured output sections (custom XML tags)
+  - Scratchpad with seeded analysis points
+  - Task-appropriate constraints
+
+  Features circuit breaker (3 failures → 60s cooldown) and in-memory cache (10min TTL).
+  In auto mode, falls back to the local 13-stage pipeline on LLM failure.
 `)
 }

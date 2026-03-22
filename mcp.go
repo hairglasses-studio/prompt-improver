@@ -79,9 +79,53 @@ func handleLint(_ context.Context, _ *mcp.CallToolRequest, args LintArgs) (*mcp.
 	}, nil, nil
 }
 
+// ImproveArgs is the input schema for the improve_prompt tool.
+type ImproveArgs struct {
+	Prompt          string `json:"prompt" jsonschema:"The prompt text to improve using LLM"`
+	TaskType        string `json:"task_type,omitempty" jsonschema:"Task type override: code, creative, analysis, troubleshooting, workflow, or general"`
+	ThinkingEnabled bool   `json:"thinking_enabled,omitempty" jsonschema:"Add thinking scaffolding to the improved prompt"`
+	Feedback        string `json:"feedback,omitempty" jsonschema:"Optional targeted improvement hints"`
+	Mode            string `json:"mode,omitempty" jsonschema:"Enhancement mode: local, llm, or auto (default: auto)"`
+}
+
+func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs) (*mcp.CallToolResult, any, error) {
+	if args.Prompt == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: prompt is required"}},
+			IsError: true,
+		}, nil, nil
+	}
+
+	tt := enhancer.ValidTaskType(args.TaskType)
+	mode := enhancer.ValidMode(args.Mode)
+	if mode == "" {
+		mode = enhancer.ModeAuto
+	}
+
+	cfg := enhancer.LoadConfig(".")
+	cfg.LLM.Enabled = true
+	if args.ThinkingEnabled {
+		cfg.LLM.ThinkingEnabled = true
+	}
+
+	engine := getOrCreateEngine(cfg.LLM)
+	if engine == nil && mode != enhancer.ModeLocal {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: ANTHROPIC_API_KEY not set — cannot use LLM improvement. Use mode=local for deterministic enhancement."}},
+			IsError: true,
+		}, nil, nil
+	}
+
+	result := enhancer.EnhanceHybrid(ctx, args.Prompt, tt, cfg, engine, mode)
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
 func runMCP() {
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "prompt-improver", Version: "1.0.0"},
+		&mcp.Implementation{Name: "prompt-improver", Version: "2.0.0"},
 		nil,
 	)
 
@@ -99,6 +143,11 @@ func runMCP() {
 		Name:        "lint_prompt",
 		Description: "Deep lint a prompt for 11 anti-patterns: overtrigger phrases, negative framing, aggressive emphasis, vague quantifiers, unmotivated rules, over-specification, injection risk, thinking-mode redundancy, example quality, compaction readiness, and cache-friendly ordering.",
 	}, handleLint)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "improve_prompt",
+		Description: "LLM-powered prompt improvement using Claude. Analyzes task type, adds domain-specific role, structured output sections, scratchpad, and template variables. Falls back to local 13-stage pipeline if LLM is unavailable. Set mode=local for deterministic-only enhancement.",
+	}, handleImprove)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		// EOF is expected when the client disconnects
