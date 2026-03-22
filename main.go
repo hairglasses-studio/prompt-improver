@@ -52,37 +52,48 @@ func main() {
 	case "enhance":
 		taskType := ""
 		mode := ""
+		quiet := false
 		prompt := ""
 		for i := 1; i < len(args); i++ {
-			if args[i] == "--type" && i+1 < len(args) {
-				taskType = args[i+1]
-				i++
-			} else if args[i] == "--mode" && i+1 < len(args) {
-				mode = args[i+1]
-				i++
-			} else if prompt == "" {
-				prompt = args[i]
-			} else {
-				prompt += " " + args[i]
+			switch args[i] {
+			case "--type":
+				if i+1 < len(args) {
+					taskType = args[i+1]
+					i++
+				}
+			case "--mode":
+				if i+1 < len(args) {
+					mode = args[i+1]
+					i++
+				}
+			case "--quiet", "-q":
+				quiet = true
+			default:
+				if prompt == "" {
+					prompt = args[i]
+				} else {
+					prompt += " " + args[i]
+				}
 			}
 		}
 		if prompt == "" {
 			prompt = readStdin()
 		}
 		if prompt == "" {
-			fmt.Fprintln(os.Stderr, "usage: prompt-improver enhance <prompt> [--type T] [--mode local|llm|auto]")
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver enhance <prompt> [--type T] [--mode local|llm|auto] [--quiet]")
 			os.Exit(1)
 		}
 		if mode != "" {
-			runEnhanceWithMode(prompt, taskType, mode)
+			runEnhanceWithMode(prompt, taskType, mode, quiet)
 		} else {
-			runEnhance(prompt, taskType)
+			runEnhanceQuiet(prompt, taskType, quiet)
 		}
 
 	case "improve":
 		taskType := ""
 		thinking := false
 		feedback := ""
+		quiet := false
 		prompt := ""
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
@@ -98,6 +109,8 @@ func main() {
 					feedback = args[i+1]
 					i++
 				}
+			case "--quiet", "-q":
+				quiet = true
 			default:
 				if prompt == "" {
 					prompt = args[i]
@@ -110,10 +123,21 @@ func main() {
 			prompt = readStdin()
 		}
 		if prompt == "" {
-			fmt.Fprintln(os.Stderr, "usage: prompt-improver improve <prompt> [--thinking] [--feedback hint] [--type T]")
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver improve <prompt> [--thinking] [--feedback hint] [--type T] [--quiet]")
 			os.Exit(1)
 		}
-		runImprove(prompt, taskType, thinking, feedback)
+		runImprove(prompt, taskType, thinking, feedback, quiet)
+
+	case "diff":
+		prompt := strings.Join(args[1:], " ")
+		if prompt == "" {
+			prompt = readStdin()
+		}
+		if prompt == "" {
+			fmt.Fprintln(os.Stderr, "usage: prompt-improver diff <prompt>")
+			os.Exit(1)
+		}
+		runDiff(prompt)
 
 	case "analyze":
 		prompt := strings.Join(args[1:], " ")
@@ -188,15 +212,23 @@ func main() {
 }
 
 func runEnhance(prompt, taskType string) {
+	runEnhanceQuiet(prompt, taskType, false)
+}
+
+func runEnhanceQuiet(prompt, taskType string, quiet bool) {
 	tt := enhancer.ValidTaskType(taskType)
 	result := enhancer.Enhance(prompt, tt)
 	result.Source = "local"
 
+	if quiet {
+		fmt.Println(result.Enhanced)
+		return
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
 }
 
-func runEnhanceWithMode(prompt, taskType, mode string) {
+func runEnhanceWithMode(prompt, taskType, mode string, quiet bool) {
 	tt := enhancer.ValidTaskType(taskType)
 	m := enhancer.ValidMode(mode)
 	if m == "" {
@@ -204,20 +236,24 @@ func runEnhanceWithMode(prompt, taskType, mode string) {
 		os.Exit(1)
 	}
 
-	cfg := enhancer.LoadConfig(".")
+	cfg := enhancer.ResolveConfig(".")
 	cfg.LLM.Enabled = true // --mode flag implies LLM should be available
 	engine := getOrCreateEngine(cfg.LLM)
 
 	result := enhancer.EnhanceHybrid(context.Background(), prompt, tt, cfg, engine, m)
 
+	if quiet {
+		fmt.Println(result.Enhanced)
+		return
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
 }
 
-func runImprove(prompt, taskType string, thinking bool, feedback string) {
+func runImprove(prompt, taskType string, thinking bool, feedback string, quiet bool) {
 	tt := enhancer.ValidTaskType(taskType)
 
-	cfg := enhancer.LoadConfig(".")
+	cfg := enhancer.ResolveConfig(".")
 	cfg.LLM.Enabled = true
 	if thinking {
 		cfg.LLM.ThinkingEnabled = true
@@ -240,8 +276,37 @@ func runImprove(prompt, taskType string, thinking bool, feedback string) {
 		os.Exit(1)
 	}
 
+	if quiet {
+		fmt.Println(result.Enhanced)
+		return
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
+}
+
+func runDiff(prompt string) {
+	result := enhancer.Enhance(prompt, "")
+	origLines := strings.Split(prompt, "\n")
+	enhLines := strings.Split(result.Enhanced, "\n")
+
+	fmt.Println("--- original")
+	fmt.Println("+++ enhanced")
+	fmt.Println()
+
+	for _, line := range origLines {
+		fmt.Printf("- %s\n", line)
+	}
+	fmt.Println()
+	for _, line := range enhLines {
+		fmt.Printf("+ %s\n", line)
+	}
+
+	if len(result.Improvements) > 0 {
+		fmt.Printf("\n%d improvements:\n", len(result.Improvements))
+		for _, imp := range result.Improvements {
+			fmt.Printf("  • %s\n", imp)
+		}
+	}
 }
 
 func getOrCreateEngine(cfg enhancer.LLMConfig) *enhancer.HybridEngine {
@@ -377,6 +442,7 @@ func runHook() {
 
 	// Smart filtering — skip short/conversational/already-structured prompts
 	if !enhancer.ShouldEnhance(hi.Prompt, cfg) {
+		fmt.Fprintf(os.Stderr, "prompt-improver: skipped (filtered: too short, conversational, or already structured)\n")
 		os.Exit(0)
 		return
 	}
@@ -393,6 +459,7 @@ func runHook() {
 	}
 	analysis := enhancer.Analyze(hi.Prompt)
 	if analysis.ScoreReport != nil && analysis.ScoreReport.Overall >= threshold {
+		fmt.Fprintf(os.Stderr, "prompt-improver: skipped (score %d >= threshold %d)\n", analysis.ScoreReport.Overall, threshold)
 		os.Exit(0)
 		return
 	}
@@ -409,6 +476,9 @@ func runHook() {
 		result = enhancer.EnhanceWithConfig(hi.Prompt, "", cfg)
 		result.Source = "local"
 	}
+
+	// Write source to cache for statusline integration
+	_ = os.WriteFile("/tmp/.prompt-improver-last-source", []byte(result.Source), 0644)
 
 	// Lean output — XML-wrapped enhanced prompt with a short directive
 	var ctxBuilder strings.Builder

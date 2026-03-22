@@ -328,7 +328,7 @@ var vagueReplacements = map[string]string{
 	"handle errors":       "Return descriptive errors with context, wrap errors at boundaries, never swallow errors silently",
 	"add tests":           "Write unit tests covering happy path, edge cases, and error conditions",
 	"fix this":            "Identify the root cause, apply a minimal fix, and verify it resolves the issue",
-	"help me":             "Guide me step-by-step through",
+	"help me":             "Guide me step-by-step to",
 	"i need":              "The goal is to",
 	"can you":             "Please",
 	"as soon as possible": "by [specific deadline]",
