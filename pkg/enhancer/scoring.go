@@ -59,6 +59,19 @@ func Score(text string, taskType TaskType, lints []LintResult, ar *AnalyzeResult
 		weighted += float64(d.Score) * d.Weight
 	}
 	overall := int(weighted + 0.5) // round
+
+	// Coherence bonus: reward well-rounded prompts that score ≥60 on 5+ dimensions.
+	// This helps CLI prompts that lack XML formalism but are otherwise well-written.
+	aboveThreshold := 0
+	for _, d := range dims {
+		if d.Score >= 60 {
+			aboveThreshold++
+		}
+	}
+	if aboveThreshold >= 5 {
+		overall += 8
+	}
+
 	if overall > 100 {
 		overall = 100
 	}
@@ -131,7 +144,7 @@ func scoreClarity(text string, _ TaskType, lints []LintResult, ar *AnalyzeResult
 			vagueCount++
 		}
 	}
-	score -= vagueCount * 8
+	score -= vagueCount * 5
 	if vagueCount > 0 {
 		suggestions = append(suggestions, "Replace vague phrases with specific instructions")
 	}
@@ -159,7 +172,7 @@ func scoreClarity(text string, _ TaskType, lints []LintResult, ar *AnalyzeResult
 }
 
 func scoreSpecificity(text string, _ TaskType, lints []LintResult, ar *AnalyzeResult) DimensionScore {
-	score := 40
+	score := 50
 	var suggestions []string
 
 	// Numeric constraints
@@ -234,7 +247,7 @@ func scoreContextMotivation(text string, _ TaskType, lints []LintResult, ar *Ana
 }
 
 func scoreStructure(text string, _ TaskType, lints []LintResult, ar *AnalyzeResult) DimensionScore {
-	score := 20
+	score := 40
 	var suggestions []string
 
 	if ar.HasXML {
@@ -354,7 +367,7 @@ func scoreDocumentPlacement(text string, _ TaskType, lints []LintResult, ar *Ana
 }
 
 func scoreRoleDefinition(text string, _ TaskType, _ []LintResult, _ *AnalyzeResult) DimensionScore {
-	score := 20
+	score := 35
 	var suggestions []string
 
 	lower := strings.ToLower(text)
@@ -373,7 +386,7 @@ func scoreRoleDefinition(text string, _ TaskType, _ []LintResult, _ *AnalyzeResu
 		score += 10
 	}
 
-	if score <= 20 {
+	if score <= 35 {
 		suggestions = append(suggestions, "Add a role definition — 'You are an expert...' sets Claude's expertise level")
 	}
 

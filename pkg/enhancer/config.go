@@ -1,6 +1,7 @@
 package enhancer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,7 +157,40 @@ func ResolveConfig(projectDir string) Config {
 		cfg.LLM.Model = m
 	}
 
+	if t := os.Getenv("PROMPT_IMPROVER_TIMEOUT"); t != "" {
+		if d, err := time.ParseDuration(t); err == nil {
+			cfg.LLM.Timeout = d
+		}
+	}
+
 	return cfg
+}
+
+// ValidateConfig checks for potential misconfiguration and returns a list of warnings.
+// Callers decide whether to treat warnings as fatal or informational.
+func ValidateConfig(cfg Config) []string {
+	var warnings []string
+
+	if cfg.LLM.Timeout != 0 && cfg.LLM.Timeout < 5*time.Second {
+		warnings = append(warnings, fmt.Sprintf("LLM timeout %v is very short (< 5s) — API calls may time out", cfg.LLM.Timeout))
+	}
+	if cfg.LLM.Timeout > 120*time.Second {
+		warnings = append(warnings, fmt.Sprintf("LLM timeout %v is very long (> 120s) — consider reducing to avoid blocking", cfg.LLM.Timeout))
+	}
+
+	if cfg.Hook.SkipScoreThreshold < 0 || cfg.Hook.SkipScoreThreshold > 100 {
+		warnings = append(warnings, fmt.Sprintf("skip_score_threshold %d is out of range (0-100)", cfg.Hook.SkipScoreThreshold))
+	}
+
+	if cfg.Hook.MinWordCount < 0 {
+		warnings = append(warnings, fmt.Sprintf("min_word_count %d is negative", cfg.Hook.MinWordCount))
+	}
+
+	if cfg.LLM.Enabled && cfg.LLM.Model == "" {
+		warnings = append(warnings, "LLM is enabled but model name is empty — will use default")
+	}
+
+	return warnings
 }
 
 // IsStageDisabled checks if a pipeline stage is disabled in config

@@ -20,11 +20,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/hairglasses-studio/prompt-improver/pkg/enhancer"
 )
+
+// version is injected at build time via -ldflags.
+var version = "dev"
 
 // hybridEngine is initialized once when LLM mode is needed.
 var hybridEngine *enhancer.HybridEngine
@@ -199,7 +203,7 @@ func main() {
 		runUninstall(args[1:])
 
 	case "version":
-		fmt.Println("prompt-improver v2.0.0")
+		fmt.Printf("prompt-improver %s\n", version)
 
 	case "help", "--help", "-h":
 		printHelp()
@@ -440,6 +444,17 @@ func runHook() {
 		cfg = enhancer.ResolveConfig("")
 	}
 
+	// Block patterns — reject prompts matching any block regex
+	for _, pat := range cfg.BlockPatterns {
+		if re, err := regexp.Compile(pat); err == nil {
+			if re.MatchString(hi.Prompt) {
+				fmt.Fprintf(os.Stderr, "prompt-improver: blocked (matches block pattern %q)\n", pat)
+				os.Exit(2)
+				return
+			}
+		}
+	}
+
 	// Smart filtering — skip short/conversational/already-structured prompts
 	if !enhancer.ShouldEnhance(hi.Prompt, cfg) {
 		fmt.Fprintf(os.Stderr, "prompt-improver: skipped (filtered: too short, conversational, or already structured)\n")
@@ -524,8 +539,8 @@ func parseFlags(args []string) map[string]string {
 }
 
 func printHelp() {
-	fmt.Print(`prompt-improver v2.0.0 — Claude-specific prompt optimization CLI
-
+	fmt.Printf("prompt-improver %s — Claude-specific prompt optimization CLI\n", version)
+	fmt.Print(`
 USAGE:
   prompt-improver <prompt>                      Enhance a prompt (default, local pipeline)
   prompt-improver enhance <prompt> [--type T] [--mode M]   Enhance with optional LLM mode
