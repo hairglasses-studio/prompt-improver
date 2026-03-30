@@ -341,6 +341,28 @@ Focus on nil pointer dereferences and unchecked errors.</instructions>
 	})
 }
 
+func TestScoringCalibration(t *testing.T) {
+	tests := []struct {
+		name     string
+		prompt   string
+		minScore int
+		maxScore int
+	}{
+		{"simple CLI prompt", "Write a Go function that parses JSON and returns a struct", 55, 75},
+		{"structured system prompt", "<role>You are an expert Go engineer</role>\n<instructions>Review this code for bugs</instructions>\n<constraints>Focus on error handling</constraints>", 75, 100},
+		{"trivial question", "what does this do", 30, 50},
+		{"medium effort", "Analyze the authentication middleware in this codebase. Look for security vulnerabilities, especially around token validation and session management. Provide a severity rating for each finding.", 60, 85},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Analyze(tt.prompt)
+			if result.ScoreReport.Overall < tt.minScore || result.ScoreReport.Overall > tt.maxScore {
+				t.Errorf("score %d outside expected range [%d, %d]", result.ScoreReport.Overall, tt.minScore, tt.maxScore)
+			}
+		})
+	}
+}
+
 // findDimension returns the DimensionScore with the given name, or a zero value.
 func findDimension(report *ScoreReport, name string) DimensionScore {
 	if report == nil {

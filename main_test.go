@@ -251,11 +251,18 @@ func TestCLI_Hook_ValidJSON(t *testing.T) {
 	}
 	// Use a prompt long enough to pass the word count filter and low-scoring enough to pass the score gate
 	hookJSON := `{"session_id":"test","prompt":"fix this bug in the sorting function that crashes on empty input","hook_event_name":"UserPromptSubmit"}`
+	// Point cwd at a temp dir so no project config is found, and override HOME
+	// to avoid picking up a global ~/.prompt-improver.yaml that may set a low
+	// skip_score_threshold or enable LLM mode.
+	tmpDir := t.TempDir()
+	hookJSONWithCwd := fmt.Sprintf(`{"session_id":"test","prompt":"fix this bug in the sorting function that crashes on empty input","hook_event_name":"UserPromptSubmit","cwd":"%s"}`, tmpDir)
 	cmd := exec.Command(binaryPath, "hook")
-	cmd.Stdin = strings.NewReader(hookJSON)
+	cmd.Stdin = strings.NewReader(hookJSONWithCwd)
+	cmd.Env = append(os.Environ(), "HOME="+tmpDir, "PROMPT_IMPROVER_LLM=0")
 	var outBuf strings.Builder
 	cmd.Stdout = &outBuf
 	// hook exits with 0
+	_ = hookJSON
 	cmd.Run()
 	if !strings.Contains(outBuf.String(), "hookSpecificOutput") {
 		t.Error("hook with valid JSON should return hookSpecificOutput")
