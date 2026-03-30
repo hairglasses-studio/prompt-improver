@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "prompt-improver": {
+      "type": "stdio",
+      "command": "prompt-improver",
+      "args": ["mcp"]
+    }
+  }
+}

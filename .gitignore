@@ -1,0 +1,20 @@
+# Binary
+prompt-improver
+
+# Build artifacts
+dist/
+
+# Test/coverage
+coverage.out
+*.prof
+*.test
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
