@@ -84,3 +84,5 @@ clean:
 ## ci: Full CI pipeline (fmt-check, lint, test, cover, bench)
 ci: fmt-check lint test cover bench
 	@echo "CI passed ($(VERSION))"
+
+-include $(HOME)/hairglasses-studio/dotfiles/make/pipeline.mk
