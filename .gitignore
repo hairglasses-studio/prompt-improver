@@ -21,3 +21,11 @@ Thumbs.db
 .env
 .env.*
 .envrc
+
+# Local env files
+.env
+.env.local
+.envrc
+.env.*
+!.env.example
+!.env.*.example

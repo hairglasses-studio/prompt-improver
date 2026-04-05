@@ -31,3 +31,7 @@ go test ./...
 ## Code Standards
 - Go standard formatting (gofmt)
 - Tests alongside source files (*_test.go)
+
+## Shared Research Repository
+
+Cross-project research lives at `~/hairglasses-studio/docs/` (git: hairglasses-studio/docs). When launching research agents, check existing docs first and write reusable research outputs back to the shared repo rather than local docs/.
