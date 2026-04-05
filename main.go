@@ -1,8 +1,8 @@
 // prompt-improver is a CLI tool that enhances prompts with XML structure,
 // specificity improvements, and task-type-aware formatting.
 //
-// Designed to run as a Claude Code UserPromptSubmit hook for automatic
-// prompt enhancement, or as a standalone CLI.
+// Designed to run as a UserPromptSubmit hook for automatic prompt
+// enhancement in Claude Code or Codex, or as a standalone CLI.
 //
 // Usage:
 //
@@ -11,7 +11,7 @@
 //	prompt-improver analyze "fix this bug"
 //	prompt-improver template troubleshoot --system resolume --symptoms "clips stuck"
 //	prompt-improver templates
-//	prompt-improver hook  (reads Claude Code UserPromptSubmit JSON from stdin)
+//	prompt-improver hook  (reads hook JSON from stdin)
 package main
 
 import (
@@ -193,7 +193,7 @@ func main() {
 		runMCP()
 
 	case "hook":
-		// Hook mode: reads JSON from stdin (Claude Code UserPromptSubmit format)
+		// Hook mode: reads JSON from stdin (compatible with Claude Code and Codex)
 		runHook()
 
 	case "install":
@@ -392,7 +392,7 @@ func runTemplate(name string, args []string) {
 	fmt.Println(filled)
 }
 
-// hookInput is the JSON Claude Code sends to UserPromptSubmit hooks on stdin
+// hookInput is the shared JSON shape sent to UserPromptSubmit hooks on stdin.
 type hookInput struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
@@ -501,7 +501,7 @@ func runHook() {
 	ctxBuilder.WriteString(result.Enhanced)
 	ctxBuilder.WriteString("\n</enhanced_prompt>\nFollow the enhanced version above. It adds structure and specificity to the original request.")
 
-	// Output structured JSON per Claude Code hook spec
+	// Output structured JSON per the shared Claude/Codex hook shape.
 	out := hookOutput{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     "UserPromptSubmit",
@@ -539,7 +539,7 @@ func parseFlags(args []string) map[string]string {
 }
 
 func printHelp() {
-	fmt.Printf("prompt-improver %s — Claude-specific prompt optimization CLI\n", version)
+	fmt.Printf("prompt-improver %s — provider-aware prompt optimization CLI\n", version)
 	fmt.Print(`
 USAGE:
   prompt-improver <prompt>                      Enhance a prompt (default, local pipeline)
@@ -552,15 +552,16 @@ USAGE:
   prompt-improver template <name> [--var val]   Fill a prompt template
   prompt-improver templates                     List available templates
   prompt-improver mcp                           MCP stdio server (4 tools)
-  prompt-improver hook                          Claude Code hook mode (JSON stdin)
-  prompt-improver install [--global] [flags]    Install hook and/or MCP into Claude Code settings
-  prompt-improver uninstall [--global]          Remove prompt-improver from Claude Code settings
+  prompt-improver hook                          UserPromptSubmit hook mode (JSON stdin)
+  prompt-improver install [--global] [flags]    Install hook and/or MCP into Claude and/or Codex config
+  prompt-improver uninstall [--global]          Remove prompt-improver from Claude and/or Codex config
   echo "prompt" | prompt-improver               Pipe mode
 
 INSTALL FLAGS:
-  --global      Write to ~/.claude/settings.json (default: .claude/settings.json)
-  --hook-only   Only install the UserPromptSubmit hook
-  --mcp-only    Only install the MCP server
+  --global                Write to ~/.claude and/or ~/.codex (default: repo-local config)
+  --provider <value>      auto (default), codex, claude, or both
+  --hook-only             Only install the UserPromptSubmit hook
+  --mcp-only              Only install the MCP server
 
 PIPELINE (13 stages):
   0  config_rules         Pattern-matched augmentations
@@ -585,12 +586,13 @@ LINT CHECKS:
   overtrigger-phrase, over-specification, decomposition-needed, injection-risk,
   thinking-mode-redundant, example-quality, compaction-readiness
 
-CLAUDE CODE HOOK INTEGRATION:
+HOOK INTEGRATION:
   Quick setup (recommended):
-    prompt-improver install --global       # hook + MCP for all projects
-    prompt-improver install                # hook + MCP for current project only
-    prompt-improver install --hook-only    # just the hook
-    prompt-improver uninstall --global     # remove everything
+    prompt-improver install --global                     # hook + MCP for preferred client
+    prompt-improver install --global --provider both    # install for both Claude and Codex
+    prompt-improver install --provider codex            # current repo only, Codex
+    prompt-improver install --hook-only                 # just the hook
+    prompt-improver uninstall --global --provider both  # remove current entries everywhere
 
   The hook automatically filters short/conversational prompts ("yes", "ok", "continue"),
   skips already-well-structured prompts, and only enhances prompts that score below 75.
@@ -602,11 +604,12 @@ CLAUDE CODE HOOK INTEGRATION:
 
   Exit code 0 = proceed, exit code 2 = block the prompt.
 
-MCP SERVER (on-demand tools for Claude Code):
+MCP SERVER (on-demand tools for Claude Code or Codex):
   Add to project .mcp.json:
     { "mcpServers": { "prompt-improver": { "type": "stdio", "command": "prompt-improver", "args": ["mcp"] } } }
 
-  Or register globally:
+  Or register with a client:
+    codex mcp add prompt-improver -- prompt-improver mcp
     claude mcp add --transport stdio prompt-improver --scope user -- prompt-improver mcp
 
   Tools exposed: analyze_prompt, enhance_prompt, lint_prompt, improve_prompt

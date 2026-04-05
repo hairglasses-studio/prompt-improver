@@ -31,7 +31,7 @@ type Config struct {
 	// DefaultEffort overrides auto-detection of effort level (low, medium, high)
 	DefaultEffort string `yaml:"default_effort"`
 
-	// Hook holds configuration specific to the UserPromptSubmit hook mode
+	// Hook holds configuration specific to the UserPromptSubmit hook mode.
 	Hook HookConfig `yaml:"hook"`
 
 	// LLM holds configuration for LLM-backed prompt improvement
@@ -59,7 +59,7 @@ type LLMConfig struct {
 	APIKeyEnv string `yaml:"api_key_env"`
 }
 
-// HookConfig holds settings for the Claude Code UserPromptSubmit hook.
+// HookConfig holds settings for a UserPromptSubmit hook.
 type HookConfig struct {
 	// SkipScoreThreshold skips enhancement if the prompt already scores >= this (default 75, 0 = always enhance)
 	SkipScoreThreshold int `yaml:"skip_score_threshold"`
