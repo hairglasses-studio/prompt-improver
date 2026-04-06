@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "prompt_improver_review",
+      "from": "prompt-improver",
+      "mode": "review",
+      "comment": "Read-oriented prompt analysis and linting profile.",
+      "read_only": true,
+      "enabled_tools": [
+        "analyze_prompt",
+        "lint_prompt",
+        "diff_prompt",
+        "check_claudemd",
+        "list_templates"
+      ]
+    },
+    {
+      "name": "prompt_improver_workspace",
+      "from": "prompt-improver",
+      "mode": "workspace",
+      "comment": "Curated prompt improvement and template workflow surface.",
+      "enabled_tools": [
+        "analyze_prompt",
+        "enhance_prompt",
+        "lint_prompt",
+        "diff_prompt",
+        "improve_prompt",
+        "check_claudemd",
+        "list_templates"
+      ]
+    }
+  ]
+}
