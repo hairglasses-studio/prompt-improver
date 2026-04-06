@@ -1,5 +1,9 @@
 # prompt-improver — Agent Instructions
 
+> Canonical instructions: AGENTS.md
+
+Use this file as the canonical instruction surface for Codex-first repo guidance. [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility mirrors.
+
 ## Project Overview
 Archived standalone prompt enhancement tool, now merged into ralphglasses. The enhancer library lives at `internal/enhancer/` and the CLI at `cmd/prompt-improver/` in the ralphglasses repo.
 

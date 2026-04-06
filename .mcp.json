@@ -2,8 +2,8 @@
   "mcpServers": {
     "prompt-improver": {
       "type": "stdio",
-      "command": "prompt-improver",
-      "args": ["mcp"]
+      "command": "bash",
+      "args": ["./scripts/mcp/prompt-improver-mcp.sh"]
     }
   }
 }
