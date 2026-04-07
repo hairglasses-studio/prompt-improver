@@ -1,4 +1,4 @@
-name: CI
+name: Go CI
 
 on:
   push:
@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: read
-
 jobs:
   test:
     uses: hairglasses-studio/.github/.github/workflows/go-test.yml@main
-    with:
-      coverage-threshold: 0
