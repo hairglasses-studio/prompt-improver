@@ -247,6 +247,8 @@ func runMCP() {
 		Description: "List all available prompt templates with their names, descriptions, task types, variables, and usage examples.",
 	}, handleListTemplates)
 
+	registerPromptImproverContract(server)
+
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		// EOF is expected when the client disconnects
 		if strings.Contains(err.Error(), "EOF") {

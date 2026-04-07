@@ -334,8 +334,6 @@ func TestCLI_MCP_Initialize(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow MCP integration test")
 	}
-	// Send JSON-RPC initialize, initialized notification, then tools/list over stdin.
-	// Use a pipe with delayed close so the server has time to process and respond.
 	initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}` + "\n"
 	initializedNotif := `{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}` + "\n"
 	toolsReq := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}` + "\n"
