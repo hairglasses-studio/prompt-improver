@@ -3,7 +3,10 @@
     "prompt-improver": {
       "type": "stdio",
       "command": "bash",
-      "args": ["./scripts/mcp/prompt-improver-mcp.sh"]
+      "args": [
+        "-lc",
+        "exec \"$HOME/hairglasses-studio/prompt-improver/scripts/mcp/prompt-improver-mcp.sh\""
+      ]
     }
   }
 }

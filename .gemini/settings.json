@@ -1,4 +1,16 @@
 {
+  "context": {
+    "fileName": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md"
+    ]
+  },
+  "mcp": {
+    "allowed": [
+      "prompt-improver"
+    ]
+  },
   "mcpServers": {
     "prompt-improver": {
       "args": [
