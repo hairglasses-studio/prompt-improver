@@ -5,6 +5,7 @@
 [![CI](https://github.com/hairglasses-studio/prompt-improver/actions/workflows/ci.yml/badge.svg)](https://github.com/hairglasses-studio/prompt-improver/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Glama](https://glama.ai/mcp/servers/hairglasses-studio/prompt-improver/badges/score.svg)](https://glama.ai/mcp/servers/hairglasses-studio/prompt-improver)
 
 Provider-aware prompt optimization CLI and MCP server. prompt-improver runs a
 deterministic 13-stage enhancement pipeline that adds XML structure, specificity
