@@ -6,7 +6,8 @@
       "args": [
         "-lc",
         "exec \"$HOME/hairglasses-studio/prompt-improver/scripts/mcp/prompt-improver-mcp.sh\""
-      ]
+      ],
+      "cwd": "."
     }
   }
 }
