@@ -16,7 +16,7 @@ help:
 
 ## build: Build binary with version injection
 build:
-	go build $(LDFLAGS) -o $(BINARY) .
+	GOWORK=off go build $(LDFLAGS) -o $(BINARY) .
 
 ## install: Build, install to /usr/local/bin, codesign (macOS)
 install: build
@@ -30,22 +30,22 @@ install: build
 
 ## test: Run all tests with race detection
 test:
-	$(GOTEST) -race -v $(GOFLAGS) ./...
+	GOWORK=off $(GOTEST) -race -v $(GOFLAGS) ./...
 
 ## test-short: Run fast tests only (skip slow integration tests)
 test-short:
-	$(GOTEST) -race -short -v $(GOFLAGS) ./...
+	GOWORK=off $(GOTEST) -race -short -v $(GOFLAGS) ./...
 
 ## cover: Run tests with coverage report
 cover:
-	$(GOTEST) -race -coverprofile=coverage.out $(GOFLAGS) ./...
+	GOWORK=off $(GOTEST) -race -coverprofile=coverage.out $(GOFLAGS) ./...
 	go tool cover -func=coverage.out
 	@echo ""
 	@echo "To view HTML report: go tool cover -html=coverage.out"
 
 ## bench: Run benchmarks
 bench:
-	$(GOTEST) ./pkg/enhancer/ -bench=. -benchmem -count=3
+	GOWORK=off $(GOTEST) ./pkg/enhancer/ -bench=. -benchmem -count=3
 
 ## lint: Run go vet and staticcheck
 lint: vet
@@ -54,7 +54,7 @@ lint: vet
 
 ## vet: Run go vet
 vet:
-	go vet ./...
+	GOWORK=off go vet ./...
 
 ## fmt: Format all Go files
 fmt:
@@ -66,14 +66,14 @@ fmt-check:
 
 ## golden-update: Regenerate golden test files
 golden-update:
-	GOLDEN_UPDATE=1 $(GOTEST) ./pkg/enhancer/ -run TestGolden -v
+	GOWORK=off GOLDEN_UPDATE=1 $(GOTEST) ./pkg/enhancer/ -run TestGolden -v
 
 ## build-all: Cross-compile for darwin/amd64, darwin/arm64, linux/amd64
 build-all:
 	@mkdir -p dist
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64 .
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64 .
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64 .
+	GOWORK=off GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64 .
+	GOWORK=off GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64 .
+	GOWORK=off GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64 .
 	@echo "Built $(VERSION) for 3 platforms in dist/"
 
 ## clean: Remove build artifacts
