@@ -72,3 +72,29 @@ Ideas and directions for prompt-improver. These are possibilities, not commitmen
 - **Opt-in usage telemetry** — Anonymous aggregate telemetry (task type distribution, scores, LLM vs local ratio) gated behind explicit `telemetry: true` in config.
 - **Prompt corpus analysis** — `prompt-improver corpus-analyze dir/` scans all markdown/text files, producing aggregate scoring across a project's prompt inventory.
 - **LLM cost tracking** — Track API token usage and estimated cost per `improve` call, with `prompt-improver costs` showing spend against a configurable budget.
+
+<!-- whiteclaw-rollout:start -->
+## Whiteclaw-Derived Overhaul (2026-04-08)
+
+This tranche applies the highest-value whiteclaw findings that fit this repo's real surface: engineer briefs, bounded skills/runbooks, searchable provenance, scoped MCP packaging, and explicit verification ladders.
+
+### Strategic Focus
+- Treat this repo as a still-valuable public CLI/MCP/hook surface, not a generic maintenance archive.
+- Use whiteclaw patterns to clarify product surfaces, provider coverage, and end-to-end verification across CLI, hooks, and MCP mode.
+- Keep the roadmap oriented around active compatibility and usability rather than archival provenance.
+
+### Recommended Work
+- [ ] [Providers] Add provider-backend work for OpenAI and Gemini alongside Claude so the repo's compatibility story is broader than one provider.
+- [ ] [End-to-end tests] Add hook and MCP end-to-end tests plus schema snapshots for the exported prompt-improvement surfaces.
+- [ ] [Usage matrix] Publish a clear usage matrix for CLI vs hook vs MCP server modes so operators know which surface to adopt.
+- [ ] [Release docs] Keep public examples, install docs, and compatibility notes aligned with the actual supported execution modes.
+
+### Rationale Snapshot
+- Tier / lifecycle: `standalone` / `maintenance-only`
+- Language profile: `Go`
+- Visibility / sensitivity: `PUBLIC` / `public`
+- Surface baseline: AGENTS=yes, skills=no, codex=yes, mcp_manifest=configured, ralph=no, roadmap=yes
+- Whiteclaw transfers in scope: multi-provider support, hook/MCP end-to-end tests, usage matrix, public compatibility docs
+- Live repo notes: AGENTS, Codex config, configured .mcp.json
+
+<!-- whiteclaw-rollout:end -->
