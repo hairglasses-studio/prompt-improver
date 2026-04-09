@@ -1,0 +1,8 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"name\": \"Roadmap\",\n  \"description\": \"Auto-exported from Roadmap (4 tasks)\",\n  \"completion\": \"0/4\",\n  \"tasks\": [\n    {\n      \"id\": \"Whiteclaw-Derived Overhaul (2026-04-08)/Recommended Work/0\",\n      \"description\": \"[Providers] Add provider-backend work for OpenAI and Gemini alongside Claude so the repo's compatibility story is broader than one provider.\",\n      \"done\": false\n    },\n    {\n      \"id\": \"Whiteclaw-Derived Overhaul (2026-04-08)/Recommended Work/1\",\n      \"description\": \"[End-to-end tests] Add hook and MCP end-to-end tests plus schema snapshots for the exported prompt-improvement surfaces.\",\n      \"done\": false\n    },\n    {\n      \"id\": \"Whiteclaw-Derived Overhaul (2026-04-08)/Recommended Work/2\",\n      \"description\": \"[Usage matrix] Publish a clear usage matrix for CLI vs hook vs MCP server modes so operators know which surface to adopt.\",\n      \"done\": false\n    },\n    {\n      \"id\": \"Whiteclaw-Derived Overhaul (2026-04-08)/Recommended Work/3\",\n      \"description\": \"[Release docs] Keep public examples, install docs, and compatibility notes aligned with the actual supported execution modes.\",\n      \"done\": false\n    }\n  ]\n}"
+    }
+  ]
+}
