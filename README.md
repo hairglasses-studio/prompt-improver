@@ -1,5 +1,14 @@
 # prompt-improver
 
+Archived compatibility surface. The standalone prompt-improver repo is no
+longer required by the active workspace maintenance set.
+
+- Active prompt workflow development now lives in `ralphglasses`.
+- Canonical `dotfiles/mcp/dotfiles-mcp` vendors the enhancer code it still
+  needs in-tree, so it no longer depends on this repo.
+- Keep this repo limited to redirect notes and archive-safe compatibility
+  context.
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/hairglasses-studio/prompt-improver.svg)](https://pkg.go.dev/github.com/hairglasses-studio/prompt-improver)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hairglasses-studio/prompt-improver)](https://goreportcard.com/report/github.com/hairglasses-studio/prompt-improver)
 [![CI](https://github.com/hairglasses-studio/prompt-improver/actions/workflows/ci.yml/badge.svg)](https://github.com/hairglasses-studio/prompt-improver/actions/workflows/ci.yml)
@@ -52,8 +61,12 @@ prompt-improver enhance "fix this bug" --quiet
 ### LLM-powered improvement
 
 ```bash
-# Direct LLM improvement (requires ANTHROPIC_API_KEY)
+# Direct LLM improvement via Anthropic
 prompt-improver improve "fix this bug"
+
+# Local Ollama-compatible improvement
+OLLAMA_BASE_URL=http://127.0.0.1:11434 OLLAMA_API_KEY=ollama \
+  prompt-improver improve "fix this bug"
 
 # With thinking scaffolding
 prompt-improver improve "fix this" --thinking
@@ -165,6 +178,27 @@ llm:
   model: claude-sonnet-4-6    # model for meta-prompting
   timeout: 15s                # API call timeout
   api_key_env: ANTHROPIC_API_KEY
+```
+
+Local Ollama example:
+
+```yaml
+llm:
+  enabled: true
+  model: qwen3:8b
+  base_url: http://127.0.0.1:11434
+  timeout: 15s
+  api_key_env: OLLAMA_API_KEY
+```
+
+If you are using the workstation-standard local setup, Ollama now runs with an
+explicit single-user latency profile: Flash Attention enabled, `q8_0` K/V cache,
+one loaded model, one parallel lane, and `OLLAMA_KEEP_ALIVE=15m`. Validate the
+shared service profile with:
+
+```bash
+~/hairglasses-studio/dotfiles/scripts/hg-ollama-smoke.sh
+~/hairglasses-studio/dotfiles/scripts/hg-ollama-full-test.sh
 ```
 
 ## Key Patterns

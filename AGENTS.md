@@ -5,7 +5,13 @@
 Use this file as the canonical instruction surface for Codex-first repo guidance. [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility mirrors.
 
 ## Project Overview
-Archived standalone prompt enhancement tool, now merged into ralphglasses. The enhancer library lives at `internal/enhancer/` and the CLI at `cmd/prompt-improver/` in the ralphglasses repo.
+Archived standalone prompt enhancement tool.
+
+- Active prompt workflow development lives in `ralphglasses`.
+- Canonical `dotfiles/mcp/dotfiles-mcp` vendors the enhancer code it still
+  needs in-tree.
+- Treat this repo as an archive-ready compatibility surface, not an active
+  development target.
 
 ## Tech Stack
 - Go 1.26+
