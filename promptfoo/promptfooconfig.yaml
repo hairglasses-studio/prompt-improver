@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: prompt-improver local Ollama regression suite
+
+prompts:
+  - '{{prompt}}'
+
+providers:
+  - id: file://provider.cjs
+    label: prompt-improver-local
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assert.js:validatePromptImproverOutput
+
+tests:
+  - description: local enhancement stays structured for code prompts
+    vars:
+      action: enhance_local
+      task_type: code
+      prompt: fix the caching bug and add regression tests for stale profile data
+      required_terms: caching, tests, profile
+
+  - description: Ollama-backed improvement preserves concrete constraints
+    vars:
+      action: improve_ollama
+      task_type: code
+      prompt: rewrite this request so the agent fixes the caching bug and adds regression tests for stale profile data
+      required_terms: caching, tests, stale

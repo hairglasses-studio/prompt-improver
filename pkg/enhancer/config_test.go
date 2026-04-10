@@ -109,6 +109,27 @@ func TestConfig_LoadConfig_Missing(t *testing.T) {
 	}
 }
 
+func TestResolveConfig_EnvOverrides(t *testing.T) {
+	t.Setenv("PROMPT_IMPROVER_LLM", "1")
+	t.Setenv("PROMPT_IMPROVER_MODEL", "qwen3:8b")
+	t.Setenv("PROMPT_IMPROVER_BASE_URL", "http://127.0.0.1:11434")
+	t.Setenv("PROMPT_IMPROVER_API_KEY_ENV", "OLLAMA_API_KEY")
+
+	cfg := ResolveConfig(t.TempDir())
+	if !cfg.LLM.Enabled {
+		t.Fatal("expected LLM to be enabled from env override")
+	}
+	if cfg.LLM.Model != "qwen3:8b" {
+		t.Fatalf("LLM.Model = %q, want %q", cfg.LLM.Model, "qwen3:8b")
+	}
+	if cfg.LLM.BaseURL != "http://127.0.0.1:11434" {
+		t.Fatalf("LLM.BaseURL = %q, want local Ollama URL", cfg.LLM.BaseURL)
+	}
+	if cfg.LLM.APIKeyEnv != "OLLAMA_API_KEY" {
+		t.Fatalf("LLM.APIKeyEnv = %q, want %q", cfg.LLM.APIKeyEnv, "OLLAMA_API_KEY")
+	}
+}
+
 func TestConfig_LoadConfig_ValidYAML(t *testing.T) {
 	cfg := Config{
 		Preamble:        "Test project preamble.",

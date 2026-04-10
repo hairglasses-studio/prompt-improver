@@ -201,6 +201,23 @@ shared service profile with:
 ~/hairglasses-studio/dotfiles/scripts/hg-ollama-full-test.sh
 ```
 
+You can also drive the local LLM path entirely from env overrides without
+editing `.prompt-improver.yaml`:
+
+```bash
+PROMPT_IMPROVER_LLM=1 \
+PROMPT_IMPROVER_MODEL=qwen3:8b \
+PROMPT_IMPROVER_BASE_URL=http://127.0.0.1:11434 \
+PROMPT_IMPROVER_API_KEY_ENV=OLLAMA_API_KEY \
+prompt-improver improve "fix the caching bug" --quiet
+```
+
+Archived compatibility coverage now includes a repo-owned promptfoo suite:
+
+```bash
+~/hairglasses-studio/dotfiles/scripts/hg-promptfoo.sh . eval -c promptfoo/promptfooconfig.yaml
+```
+
 ## Key Patterns
 
 - **Smart filtering**: Short, conversational, and already-structured prompts are
