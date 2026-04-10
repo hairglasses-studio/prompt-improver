@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -20,24 +21,70 @@ type LLMClient struct {
 	HTTPClient *http.Client
 }
 
+func resolveLLMBaseURL(cfg LLMConfig) string {
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" && strings.EqualFold(cfg.APIKeyEnv, "OLLAMA_API_KEY") {
+		baseURL = strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL"))
+	}
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	return strings.TrimRight(baseURL, "/")
+}
+
+func isLocalOllamaBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+func resolveLLMAPIKey(cfg LLMConfig, baseURL string) string {
+	if isLocalOllamaBaseURL(baseURL) {
+		if cfg.APIKeyEnv != "" && !strings.EqualFold(cfg.APIKeyEnv, "ANTHROPIC_API_KEY") {
+			if apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv)); apiKey != "" {
+				return apiKey
+			}
+		}
+		if apiKey := strings.TrimSpace(os.Getenv("OLLAMA_API_KEY")); apiKey != "" {
+			return apiKey
+		}
+		return "ollama"
+	}
+	if cfg.APIKeyEnv != "" {
+		if apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv)); apiKey != "" {
+			return apiKey
+		}
+	}
+	if apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); apiKey != "" {
+		return apiKey
+	}
+	return ""
+}
+
+func defaultLLMModel(baseURL string) string {
+	if isLocalOllamaBaseURL(baseURL) {
+		if model := strings.TrimSpace(os.Getenv("OLLAMA_CHAT_MODEL")); model != "" {
+			return model
+		}
+		return "qwen3:8b"
+	}
+	return "claude-sonnet-4-6"
+}
+
 // NewLLMClient creates a client from config. Returns nil if no API key is available.
 func NewLLMClient(cfg LLMConfig) *LLMClient {
-	apiKey := os.Getenv(cfg.APIKeyEnv)
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
+	baseURL := resolveLLMBaseURL(cfg)
+	apiKey := resolveLLMAPIKey(cfg, baseURL)
 	if apiKey == "" {
 		return nil
 	}
 
 	model := cfg.Model
 	if model == "" {
-		model = "claude-sonnet-4-6"
-	}
-
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.anthropic.com"
+		model = defaultLLMModel(baseURL)
 	}
 
 	timeout := cfg.Timeout

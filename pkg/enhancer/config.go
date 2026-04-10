@@ -46,10 +46,10 @@ type LLMConfig struct {
 	// ThinkingEnabled adds thinking scaffolding to the meta-prompt
 	ThinkingEnabled bool `yaml:"thinking_enabled"`
 
-	// Model is the Claude model to use (default "claude-sonnet-4-6")
+	// Model is the LLM model to use (default depends on base URL / provider path)
 	Model string `yaml:"model"`
 
-	// BaseURL is the API base URL (default "https://api.anthropic.com")
+	// BaseURL is the API base URL (default Anthropic; may also target local Ollama compatibility)
 	BaseURL string `yaml:"base_url"`
 
 	// Timeout is the API call timeout (default 15s)

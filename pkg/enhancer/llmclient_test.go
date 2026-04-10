@@ -191,3 +191,36 @@ func TestNewLLMClient_NoAPIKey(t *testing.T) {
 		t.Error("expected nil client when API key is missing")
 	}
 }
+
+func TestNewLLMClient_LocalOllamaUsesDummyKey(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "")
+	t.Setenv("OLLAMA_CHAT_MODEL", "")
+
+	client := NewLLMClient(LLMConfig{
+		APIKeyEnv: "OLLAMA_API_KEY",
+		BaseURL:   "http://127.0.0.1:11434",
+	})
+	if client == nil {
+		t.Fatal("expected local Ollama client")
+	}
+	if client.APIKey != "ollama" {
+		t.Fatalf("client.APIKey = %q, want %q", client.APIKey, "ollama")
+	}
+	if client.Model != "qwen3:8b" {
+		t.Fatalf("client.Model = %q, want %q", client.Model, "qwen3:8b")
+	}
+}
+
+func TestNewLLMClient_LocalOllamaBaseURLFromEnv(t *testing.T) {
+	t.Setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/")
+
+	client := NewLLMClient(LLMConfig{
+		APIKeyEnv: "OLLAMA_API_KEY",
+	})
+	if client == nil {
+		t.Fatal("expected local Ollama client")
+	}
+	if client.BaseURL != "http://127.0.0.1:11434" {
+		t.Fatalf("client.BaseURL = %q, want %q", client.BaseURL, "http://127.0.0.1:11434")
+	}
+}
