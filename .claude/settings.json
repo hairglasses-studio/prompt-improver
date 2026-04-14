@@ -5,7 +5,8 @@
         "-lc",
         "exec \"$HOME/hairglasses-studio/prompt-improver/scripts/mcp/prompt-improver-mcp.sh\""
       ],
-      "command": "bash"
+      "command": "bash",
+      "cwd": "."
     }
   }
 }

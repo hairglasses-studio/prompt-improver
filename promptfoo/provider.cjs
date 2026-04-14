@@ -48,26 +48,12 @@ class PromptImproverProvider {
     const vars = context?.vars || {};
     const action = vars.action || 'enhance_local';
     const taskType = vars.task_type || 'general';
-    const env = {
-      ...process.env,
-      OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
-      OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || 'ollama',
-    };
+    const env = { ...process.env };
 
     let args;
     switch (action) {
       case 'enhance_local':
         args = ['enhance', '--quiet', '--type', taskType, prompt];
-        break;
-      case 'improve_ollama':
-        env.PROMPT_IMPROVER_LLM = '1';
-        env.PROMPT_IMPROVER_MODEL =
-          process.env.OLLAMA_FAST_MODEL ||
-          process.env.OLLAMA_CHAT_MODEL ||
-          'qwen3:8b';
-        env.PROMPT_IMPROVER_BASE_URL = env.OLLAMA_BASE_URL;
-        env.PROMPT_IMPROVER_API_KEY_ENV = 'OLLAMA_API_KEY';
-        args = ['improve', '--quiet', '--type', taskType, prompt];
         break;
       default:
         throw new Error(`unsupported action ${action}`);

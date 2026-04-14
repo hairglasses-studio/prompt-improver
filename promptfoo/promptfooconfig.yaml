@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
-description: prompt-improver local Ollama regression suite
+description: prompt-improver deterministic local regression suite
 
 prompts:
   - '{{prompt}}'
@@ -20,10 +20,3 @@ tests:
       task_type: code
       prompt: fix the caching bug and add regression tests for stale profile data
       required_terms: caching, tests, profile
-
-  - description: Ollama-backed improvement preserves concrete constraints
-    vars:
-      action: improve_ollama
-      task_type: code
-      prompt: rewrite this request so the agent fixes the caching bug and adds regression tests for stale profile data
-      required_terms: caching, tests, stale

@@ -264,7 +264,7 @@ func runImprove(prompt, taskType string, thinking bool, feedback string, quiet b
 	}
 	engine := getOrCreateEngine(cfg.LLM)
 	if engine == nil {
-		fmt.Fprintln(os.Stderr, "error: no LLM credentials or local Ollama config available — set ANTHROPIC_API_KEY or configure llm.base_url with OLLAMA_API_KEY")
+		fmt.Fprintln(os.Stderr, "error: no LLM credentials available — set ANTHROPIC_API_KEY or configure llm.api_key_env for your Anthropic-compatible endpoint")
 		os.Exit(1)
 	}
 

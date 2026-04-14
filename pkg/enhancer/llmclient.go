@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -23,36 +22,13 @@ type LLMClient struct {
 
 func resolveLLMBaseURL(cfg LLMConfig) string {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" && strings.EqualFold(cfg.APIKeyEnv, "OLLAMA_API_KEY") {
-		baseURL = strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL"))
-	}
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
 	}
 	return strings.TrimRight(baseURL, "/")
 }
 
-func isLocalOllamaBaseURL(baseURL string) bool {
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(parsed.Hostname())
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
-}
-
-func resolveLLMAPIKey(cfg LLMConfig, baseURL string) string {
-	if isLocalOllamaBaseURL(baseURL) {
-		if cfg.APIKeyEnv != "" && !strings.EqualFold(cfg.APIKeyEnv, "ANTHROPIC_API_KEY") {
-			if apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv)); apiKey != "" {
-				return apiKey
-			}
-		}
-		if apiKey := strings.TrimSpace(os.Getenv("OLLAMA_API_KEY")); apiKey != "" {
-			return apiKey
-		}
-		return "ollama"
-	}
+func resolveLLMAPIKey(cfg LLMConfig) string {
 	if cfg.APIKeyEnv != "" {
 		if apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv)); apiKey != "" {
 			return apiKey
@@ -64,27 +40,21 @@ func resolveLLMAPIKey(cfg LLMConfig, baseURL string) string {
 	return ""
 }
 
-func defaultLLMModel(baseURL string) string {
-	if isLocalOllamaBaseURL(baseURL) {
-		if model := strings.TrimSpace(os.Getenv("OLLAMA_CHAT_MODEL")); model != "" {
-			return model
-		}
-		return "qwen3:8b"
-	}
+func defaultLLMModel() string {
 	return "claude-sonnet-4-6"
 }
 
 // NewLLMClient creates a client from config. Returns nil if no API key is available.
 func NewLLMClient(cfg LLMConfig) *LLMClient {
 	baseURL := resolveLLMBaseURL(cfg)
-	apiKey := resolveLLMAPIKey(cfg, baseURL)
+	apiKey := resolveLLMAPIKey(cfg)
 	if apiKey == "" {
 		return nil
 	}
 
 	model := cfg.Model
 	if model == "" {
-		model = defaultLLMModel(baseURL)
+		model = defaultLLMModel()
 	}
 
 	timeout := cfg.Timeout

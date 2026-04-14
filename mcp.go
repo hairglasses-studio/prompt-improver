@@ -186,7 +186,7 @@ func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs
 	engine := getOrCreateEngine(cfg.LLM)
 	if engine == nil && mode != enhancer.ModeLocal {
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "error: no LLM credentials or local Ollama config available — set ANTHROPIC_API_KEY or configure llm.base_url with OLLAMA_API_KEY. Use mode=local for deterministic enhancement."}},
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: no LLM credentials available — set ANTHROPIC_API_KEY or configure llm.api_key_env for your Anthropic-compatible endpoint. Use mode=local for deterministic enhancement."}},
 			IsError: true,
 		}, nil, nil
 	}
