@@ -243,6 +243,10 @@ func runEnhanceWithMode(prompt, taskType, mode string, quiet bool) {
 	cfg := enhancer.ResolveConfig(".")
 	cfg.LLM.Enabled = true // --mode flag implies LLM should be available
 	engine := getOrCreateEngine(cfg.LLM)
+	if engine == nil && m == enhancer.ModeLLM {
+		fmt.Fprintln(os.Stderr, "error: LLM-backed enhancement is disabled to conserve Anthropic/OpenAI budget; use --mode local")
+		os.Exit(1)
+	}
 
 	result := enhancer.EnhanceHybrid(context.Background(), prompt, tt, cfg, engine, m)
 
@@ -264,7 +268,7 @@ func runImprove(prompt, taskType string, thinking bool, feedback string, quiet b
 	}
 	engine := getOrCreateEngine(cfg.LLM)
 	if engine == nil {
-		fmt.Fprintln(os.Stderr, "error: no LLM credentials available — set ANTHROPIC_API_KEY or configure llm.api_key_env for your Anthropic-compatible endpoint")
+		fmt.Fprintln(os.Stderr, "error: LLM-backed improvement is disabled to conserve Anthropic/OpenAI budget; use `prompt-improver enhance --mode local`")
 		os.Exit(1)
 	}
 
@@ -614,26 +618,14 @@ MCP SERVER (on-demand tools for Claude Code or Codex):
 
   Tools exposed: analyze_prompt, enhance_prompt, lint_prompt, improve_prompt
 
-LLM-POWERED IMPROVEMENT (v2.0.0):
-  prompt-improver improve "fix this bug"           # direct LLM improvement
-  prompt-improver improve "fix this" --thinking    # with thinking scaffolding
-  prompt-improver enhance "fix this" --mode auto   # try LLM, fall back to local
-  prompt-improver enhance "fix this" --mode llm    # LLM only (fail if unavailable)
+LLM MODES:
+  prompt-improver improve "fix this bug"           # disabled to conserve budget
+  prompt-improver enhance "fix this" --mode auto   # falls back to local pipeline
+  prompt-improver enhance "fix this" --mode llm    # disabled
   prompt-improver enhance "fix this" --mode local  # deterministic pipeline only
 
-  Requires ANTHROPIC_API_KEY environment variable.
-  Configure in .prompt-improver.yaml:
-
-    llm:
-      enabled: true             # enable LLM in hook mode (default: false)
-      thinking_enabled: true    # add thinking scaffolding
-      model: claude-sonnet-4-6  # model for meta-prompting
-      timeout: 15s              # API call timeout
-      api_key_env: ANTHROPIC_API_KEY
-
-  The LLM mode sends your prompt to Claude with a meta-prompt that adds:
-  - Domain-specific role definition
-  - Template variables for external data
+  Anthropic/OpenAI-backed improvement is disabled to conserve shared budget for active coding sessions.
+  Use local enhancement modes instead.
   - Structured output sections (custom XML tags)
   - Scratchpad with seeded analysis points
   - Task-appropriate constraints
