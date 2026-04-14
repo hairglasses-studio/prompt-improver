@@ -183,32 +183,20 @@ func TestLLMClient_ContextCancellation(t *testing.T) {
 }
 
 func TestNewLLMClient_NoAPIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
 	client := NewLLMClient(LLMConfig{
 		APIKeyEnv: "NONEXISTENT_KEY_FOR_TESTING_12345",
 	})
 	if client != nil {
-		t.Error("expected nil client when API key is missing")
+		t.Error("expected nil client while LLM-backed improvement is disabled")
 	}
 }
 
-func TestNewLLMClient_UsesConfiguredAPIKeyEnv(t *testing.T) {
-	t.Setenv("CUSTOM_ANTHROPIC_KEY", "test-key")
-
+func TestNewLLMClient_DisabledEvenWithConfiguredAPIKeyEnv(t *testing.T) {
 	client := NewLLMClient(LLMConfig{
 		APIKeyEnv: "CUSTOM_ANTHROPIC_KEY",
 		BaseURL:   "https://anthropic-proxy.internal",
 	})
-	if client == nil {
-		t.Fatal("expected configured LLM client")
-	}
-	if client.APIKey != "test-key" {
-		t.Fatalf("client.APIKey = %q, want %q", client.APIKey, "test-key")
-	}
-	if client.Model != "claude-sonnet-4-6" {
-		t.Fatalf("client.Model = %q, want %q", client.Model, "claude-sonnet-4-6")
-	}
-	if client.BaseURL != "https://anthropic-proxy.internal" {
-		t.Fatalf("client.BaseURL = %q, want %q", client.BaseURL, "https://anthropic-proxy.internal")
+	if client != nil {
+		t.Fatal("expected nil client while hosted LLM improvement is disabled")
 	}
 }

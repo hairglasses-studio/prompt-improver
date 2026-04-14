@@ -184,11 +184,14 @@ func handleImprove(ctx context.Context, _ *mcp.CallToolRequest, args ImproveArgs
 	}
 
 	engine := getOrCreateEngine(cfg.LLM)
-	if engine == nil && mode != enhancer.ModeLocal {
+	if engine == nil && mode == enhancer.ModeLLM {
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "error: no LLM credentials available — set ANTHROPIC_API_KEY or configure llm.api_key_env for your Anthropic-compatible endpoint. Use mode=local for deterministic enhancement."}},
+			Content: []mcp.Content{&mcp.TextContent{Text: "error: LLM-backed improvement is disabled to conserve Anthropic/OpenAI budget. Use mode=local for deterministic enhancement."}},
 			IsError: true,
 		}, nil, nil
+	}
+	if engine == nil {
+		mode = enhancer.ModeLocal
 	}
 
 	result := enhancer.EnhanceHybrid(ctx, args.Prompt, tt, cfg, engine, mode)

@@ -61,13 +61,10 @@ prompt-improver enhance "fix this bug" --quiet
 ### LLM-powered improvement
 
 ```bash
-# Direct LLM improvement via Anthropic
+# Direct LLM improvement is currently disabled
 prompt-improver improve "fix this bug"
 
-# With thinking scaffolding
-prompt-improver improve "fix this" --thinking
-
-# Hybrid mode: try LLM, fall back to local pipeline
+# Local fallback remains available
 prompt-improver enhance "fix this" --mode auto
 ```
 
@@ -169,11 +166,7 @@ hook:
   min_word_count: 5           # skip prompts shorter than this
 
 llm:
-  enabled: true               # enable LLM in hook mode
-  thinking_enabled: true      # add thinking scaffolding
-  model: claude-sonnet-4-6    # model for meta-prompting
-  timeout: 15s                # API call timeout
-  api_key_env: ANTHROPIC_API_KEY
+  enabled: false              # hosted LLM improvement is currently disabled
 ```
 
 Archived compatibility coverage now includes a repo-owned promptfoo suite:
@@ -187,10 +180,8 @@ Archived compatibility coverage now includes a repo-owned promptfoo suite:
 - **Smart filtering**: Short, conversational, and already-structured prompts are
   automatically skipped in hook mode.
 - **Score gate**: Prompts scoring above the threshold are passed through unmodified.
-- **Circuit breaker**: LLM mode uses a circuit breaker (3 failures, 60s cooldown)
-  and an in-memory cache (10min TTL).
-- **Hybrid fallback**: `--mode auto` tries LLM first, then falls back to the
-  deterministic pipeline on failure.
+- **Circuit breaker**: The disabled LLM path remains guarded by the existing circuit breaker and cache primitives.
+- **Hybrid fallback**: `--mode auto` currently resolves to the deterministic local pipeline because hosted LLM improvement is disabled.
 - **Task-type detection**: Automatic classification into code, creative, analysis,
   troubleshooting, workflow, or general.
 
